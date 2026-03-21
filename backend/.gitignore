@@ -1,0 +1,6 @@
+node_modules/
+novamart.db
+.env
+*.log
+uploads/products/*
+!uploads/products/.gitkeep
