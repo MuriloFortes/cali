@@ -28,6 +28,32 @@ function orderToResponse(row, items = [], userInfo = null) {
   return o;
 }
 
+/** Polling para o admin: último pedido (novo pedido = id diferente do anterior). */
+router.get("/admin/latest", authenticate, requireAdmin, (req, res) => {
+  const row = db
+    .prepare(
+      `SELECT o.id, o.created_at, o.total, o.status, u.name as user_name, u.email as user_email
+       FROM orders o
+       JOIN users u ON u.id = o.user_id
+       ORDER BY o.created_at DESC LIMIT 1`
+    )
+    .get();
+  if (!row) {
+    return res.json({ latestOrderId: null, latest: null });
+  }
+  res.json({
+    latestOrderId: row.id,
+    latest: {
+      id: row.id,
+      createdAt: row.created_at,
+      total: row.total,
+      status: row.status,
+      userName: row.user_name,
+      userEmail: row.user_email,
+    },
+  });
+});
+
 router.get("/", authenticate, (req, res) => {
   const { status, userId } = req.query;
   const isAdmin = req.user.role === "admin";

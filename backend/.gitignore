@@ -1,5 +1,8 @@
 node_modules/
 novamart.db
+novamart.db-wal
+novamart.db-shm
+novamart.db.backup-plain-*
 .env
 *.log
 uploads/products/*

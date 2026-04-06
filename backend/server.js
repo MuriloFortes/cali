@@ -18,7 +18,11 @@ initDatabase();
 const app = express();
 const PORT = process.env.PORT || 3002;
 
-app.use(cors({ origin: "http://localhost:5173" }));
+// Atrás do Nginx / proxy: necessário para IP real em ADMIN_ALLOWED_IPS e logs
+app.set("trust proxy", 1);
+
+const corsOrigin = process.env.CORS_ORIGIN || "http://localhost:5173";
+app.use(cors({ origin: corsOrigin === "*" ? true : corsOrigin.split(",").map((s) => s.trim()) }));
 app.use(express.json());
 
 // Servir arquivos estáticos de uploads (produtos e avatares)

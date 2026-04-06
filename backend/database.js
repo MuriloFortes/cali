@@ -1,4 +1,4 @@
-import Database from "better-sqlite3";
+import Database from "better-sqlite3-multiple-ciphers";
 import bcrypt from "bcryptjs";
 import { fileURLToPath } from "url";
 import { dirname, join } from "path";
@@ -6,7 +6,35 @@ import { dirname, join } from "path";
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
-const db = new Database(join(__dirname, "novamart.db"));
+const dbPath = join(__dirname, "novamart.db");
+
+/** Aspas simples em chaves PRAGMA key/rekey devem ser duplicadas. */
+export function escapeSqliteKeyPhrase(key) {
+  return String(key).replace(/'/g, "''");
+}
+
+/**
+ * Abre o SQLite (criptografado se SQLITE_ENCRYPTION_KEY estiver definida).
+ * Banco já existente em texto claro: rode `npm run db:encrypt` uma vez antes de ligar a API com a chave.
+ */
+function createConnection() {
+  const db = new Database(dbPath);
+  const encryptionKey = process.env.SQLITE_ENCRYPTION_KEY;
+
+  if (encryptionKey) {
+    db.pragma(`key='${escapeSqliteKeyPhrase(encryptionKey)}'`);
+  }
+
+  try {
+    db.pragma("journal_mode = WAL");
+  } catch {
+    /* ignore */
+  }
+
+  return db;
+}
+
+const db = createConnection();
 
 function runSchema() {
   db.exec(`

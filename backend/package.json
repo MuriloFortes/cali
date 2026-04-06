@@ -5,16 +5,17 @@
   "scripts": {
     "start": "node server.js",
     "dev": "node --watch server.js",
-    "seed": "node -e \"import('./database.js').then(m => m.resetDatabase())\""
+    "seed": "node -e \"import('./database.js').then(m => m.resetDatabase())\"",
+    "db:encrypt": "node scripts/encrypt-db.mjs"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",
-    "better-sqlite3": "^11.6.0",
+    "better-sqlite3-multiple-ciphers": "^12.8.0",
     "cors": "^2.8.5",
     "dotenv": "^16.6.1",
     "express": "^4.21.0",
     "jsonwebtoken": "^9.0.2",
     "multer": "^1.4.5-lts.1",
-    "nodemailer": "^6.10.1"
+    "nodemailer": "^8.0.3"
   }
 }

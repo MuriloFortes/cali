@@ -375,6 +375,185 @@ function useApp() {
   return ctx;
 }
 
+/** Som curto e suave para novo pedido (Web Audio API). */
+function playNewOrderChime() {
+  try {
+    const AC = window.AudioContext || window.webkitAudioContext;
+    if (!AC) return;
+    const ctx = new AC();
+    const playTone = (freq, startSec, durationSec) => {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = "sine";
+      osc.frequency.value = freq;
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      const t0 = ctx.currentTime + startSec;
+      gain.gain.setValueAtTime(0.0001, t0);
+      gain.gain.exponentialRampToValueAtTime(0.1, t0 + 0.02);
+      gain.gain.exponentialRampToValueAtTime(0.0001, t0 + durationSec);
+      osc.start(t0);
+      osc.stop(t0 + durationSec + 0.05);
+    };
+    playTone(659.25, 0, 0.22);
+    playTone(783.99, 0.16, 0.24);
+    playTone(987.77, 0.38, 0.32);
+    void ctx.resume?.();
+  } catch {
+    /* ignore */
+  }
+}
+
+const IDLE_LOGOUT_MS = 2 * 60 * 1000;
+
+function useIdleLogout(active, dispatch) {
+  const dispatchRef = useRef(dispatch);
+  dispatchRef.current = dispatch;
+  useEffect(() => {
+    if (!active) return;
+    let timeoutId;
+    const reset = () => {
+      clearTimeout(timeoutId);
+      timeoutId = setTimeout(() => {
+        sessionStorage.removeItem("novamart_token");
+        dispatchRef.current({ type: "LOGOUT" });
+        dispatchRef.current({
+          type: "ADD_TOAST",
+          payload: { type: "warning", message: "Sessão encerrada por inatividade (2 minutos)." },
+        });
+      }, IDLE_LOGOUT_MS);
+    };
+    reset();
+    const events = ["mousedown", "keydown", "touchstart", "scroll", "click"];
+    events.forEach((e) => window.addEventListener(e, reset, { passive: true }));
+    return () => {
+      clearTimeout(timeoutId);
+      events.forEach((e) => window.removeEventListener(e, reset));
+    };
+  }, [active]);
+}
+
+function AdminOrderNotifier() {
+  const { state, dispatch } = useApp();
+  const [popup, setPopup] = useState(null);
+  const bootRef = useRef(false);
+  const lastIdRef = useRef(null);
+
+  useEffect(() => {
+    if (state.currentUser?.role !== "admin") {
+      bootRef.current = false;
+      lastIdRef.current = null;
+      setPopup(null);
+      return;
+    }
+
+    let cancelled = false;
+    const poll = async () => {
+      if (cancelled) return;
+      try {
+        const data = await api("/orders/admin/latest", {}, dispatch);
+        const id = data.latestOrderId;
+        if (id == null) return;
+        if (!bootRef.current) {
+          bootRef.current = true;
+          lastIdRef.current = id;
+          return;
+        }
+        if (id !== lastIdRef.current && data.latest) {
+          lastIdRef.current = id;
+          setPopup(data.latest);
+          playNewOrderChime();
+        }
+      } catch {
+        /* 401 já desloga via api() */
+      }
+    };
+
+    poll();
+    const t = setInterval(poll, 20000);
+    return () => {
+      cancelled = true;
+      clearInterval(t);
+    };
+  }, [state.currentUser?.role, state.currentUser?.id, dispatch]);
+
+  if (!popup) return null;
+
+  const totalFmt =
+    typeof popup.total === "number"
+      ? new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(popup.total)
+      : String(popup.total ?? "");
+  const when = popup.createdAt
+    ? new Date(popup.createdAt).toLocaleString("pt-BR", { dateStyle: "short", timeStyle: "short" })
+    : "";
+
+  return (
+    <div className="fixed inset-0 z-[200] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-fade-in">
+      <div
+        className="w-full max-w-md rounded-2xl border border-emerald-500/30 shadow-2xl p-6 space-y-4"
+        style={{ background: "rgba(15,23,42,0.95)" }}
+        role="dialog"
+        aria-labelledby="new-order-title"
+      >
+        <div className="flex items-start gap-3">
+          <div className="w-12 h-12 rounded-xl bg-emerald-500/20 flex items-center justify-center text-2xl shrink-0">🔔</div>
+          <div>
+            <h2 id="new-order-title" className="text-lg font-semibold text-white">
+              Novo pedido recebido
+            </h2>
+            <p className="text-sm text-zinc-400 mt-1">
+              {popup.userName ? (
+                <>
+                  <span className="text-zinc-200">{popup.userName}</span>
+                  {popup.userEmail ? <span className="text-zinc-500"> · {popup.userEmail}</span> : null}
+                </>
+              ) : (
+                "Um cliente acabou de finalizar um pedido."
+              )}
+            </p>
+          </div>
+        </div>
+        <div className="rounded-xl bg-white/5 border border-white/10 p-4 space-y-2 text-sm">
+          <div className="flex justify-between text-zinc-400">
+            <span>Pedido</span>
+            <span className="text-white font-mono">#{String(popup.id).slice(0, 12)}</span>
+          </div>
+          <div className="flex justify-between text-zinc-400">
+            <span>Total</span>
+            <span className="text-emerald-300 font-semibold">{totalFmt}</span>
+          </div>
+          {when ? (
+            <div className="flex justify-between text-zinc-400">
+              <span>Data</span>
+              <span className="text-zinc-300">{when}</span>
+            </div>
+          ) : null}
+        </div>
+        <div className="flex gap-3 justify-end">
+          <button
+            type="button"
+            onClick={() => setPopup(null)}
+            className="px-4 py-2.5 rounded-xl border border-white/15 text-zinc-300 text-sm hover:bg-white/5"
+          >
+            Fechar
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setPopup(null);
+              dispatch({ type: "SET_ADMIN_PAGE", payload: "overview" });
+              dispatch({ type: "NAVIGATE", payload: "admin-dashboard" });
+            }}
+            className="px-4 py-2.5 rounded-xl bg-emerald-600 text-white text-sm font-medium hover:bg-emerald-500"
+          >
+            Abrir painel
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 // HELPERS
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -1303,7 +1482,6 @@ function AuthPage() {
   const [twoFactor, setTwoFactor] = useState(false);
   const [twoFactorCode, setTwoFactorCode] = useState(["", "", "", "", "", ""]);
   const [twoFactorError, setTwoFactorError] = useState(null);
-  const [twoFactorChannel, setTwoFactorChannel] = useState(null);
   const [twoFactorContact, setTwoFactorContact] = useState("");
   const [twoFactorLoading, setTwoFactorLoading] = useState(false);
   const codeInputsRef = useRef([]);
@@ -1330,10 +1508,9 @@ function AuthPage() {
     setLoading(true);
     setErrors({});
     try {
-      const data = await api("/auth/login", { method: "POST", body: { email: form.email.trim(), password: form.password, channel: "sms" } }, dispatch);
+      const data = await api("/auth/login", { method: "POST", body: { email: form.email.trim(), password: form.password, channel: "email" } }, dispatch);
       if (data.twoFactorRequired) {
         setTwoFactor(true);
-        setTwoFactorChannel(data.channel);
         setTwoFactorContact(data.contact || "");
         setTwoFactorCode(["", "", "", "", "", ""]);
         setTwoFactorError(null);
@@ -1346,7 +1523,10 @@ function AuthPage() {
         dispatch({ type: "ADD_TOAST", payload: { type: "success", message: `Bem-vindo(a), ${data.user.name}! 👋` } });
       }
     } catch (err) {
-      const msg = err.status === 403 ? "Conta desativada. Entre em contato com o suporte." : (err.message || "E-mail ou senha incorretos");
+      const msg =
+        err.status === 403
+          ? (err.message || "Acesso negado.")
+          : err.message || "E-mail ou senha incorretos";
       setErrors({ general: msg });
       if (err.status !== 401 && err.status !== 403) {
         dispatch({ type: "ADD_TOAST", payload: { type: "error", message: msg } });
@@ -1462,7 +1642,7 @@ function AuthPage() {
                 </p>
                 <p className="text-xs text-zinc-400">
                   Enviamos um código de 6 dígitos para{" "}
-                  <span className="font-semibold text-zinc-200">{twoFactorContact}</span> ({twoFactorChannel === "sms" ? "SMS" : "e-mail"}).
+                  <span className="font-semibold text-zinc-200">{twoFactorContact}</span> (e-mail).
                 </p>
                 <div className="flex justify-between gap-1" onPaste={e => {
                   const text = e.clipboardData.getData("text").replace(/\D/g, "").slice(0, 6);
@@ -3128,12 +3308,10 @@ function PhoneVerificationFlow() {
       dispatch({ type: "SET_SMS_STEP", payload: "code" });
       dispatch({ type: "SET_SMS_COUNTDOWN", payload: 60 });
       dispatch({ type: "SET_SMS_CODE", payload: ["", "", "", "", "", ""] });
-      if (data.mockCode) {
-        dispatch({ type: "SET_SMS_MOCK_CODE", payload: data.mockCode });
-      }
+      dispatch({ type: "SET_SMS_MOCK_CODE", payload: null });
     } catch (err) {
       dispatch({ type: "SET_SMS_STEP", payload: "input" });
-      dispatch({ type: "SET_SMS_ERROR", payload: err.message || "Erro ao enviar SMS" });
+      dispatch({ type: "SET_SMS_ERROR", payload: err.message || "Erro ao enviar o código por e-mail" });
     }
   };
 
@@ -3192,7 +3370,7 @@ function PhoneVerificationFlow() {
       <div className="space-y-3">
         <p className="text-sm text-zinc-300 font-medium">Alterar telefone</p>
         <p className="text-xs text-zinc-500">
-          Enviaremos um SMS com um código de 6 dígitos para confirmar o novo número.
+          Enviaremos um código de 6 dígitos para o seu e-mail cadastrado para confirmar o novo número.
         </p>
         <div className="space-y-1">
           <label className="block text-xs text-zinc-500 mb-1">Novo número</label>
@@ -3228,7 +3406,7 @@ function PhoneVerificationFlow() {
             {state.smsStep === "sending" && (
               <span className="w-3 h-3 border-2 border-white/40 border-t-white rounded-full animate-spin" />
             )}
-            Enviar código SMS
+            Enviar código por e-mail
           </button>
         </div>
       </div>
@@ -3244,7 +3422,7 @@ function PhoneVerificationFlow() {
         <div>
           <p className="text-sm text-zinc-300 font-medium">Digite o código recebido</p>
           <p className="text-xs text-zinc-500">
-            Enviamos um SMS para <span className="font-medium text-zinc-300">{state.smsPendingPhone}</span>.
+            Verifique sua caixa de entrada (e spam). O código foi enviado para o e-mail da sua conta.
           </p>
         </div>
         <div className="flex justify-between gap-1" onPaste={handlePaste}>
@@ -3262,11 +3440,6 @@ function PhoneVerificationFlow() {
           ))}
         </div>
         {state.smsError && <p className="text-xs text-rose-400">{state.smsError}</p>}
-        {state.smsMockCode && (
-          <div className="text-[11px] text-sky-300 bg-sky-500/10 border border-sky-500/30 px-3 py-2 rounded-lg">
-            🧪 Modo dev — código: <span className="font-mono">{state.smsMockCode}</span>
-          </div>
-        )}
         <div className="flex items-center justify-between text-[11px] text-zinc-500">
           {!canResend ? (
             <span>Reenviar em {countdown}s</span>
@@ -5443,7 +5616,8 @@ function PlaceholderPage({ title, emoji, description }) {
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 function AppRouter() {
-  const { state } = useApp();
+  const { state, dispatch } = useApp();
+  useIdleLogout(Boolean(state.currentUser), dispatch);
 
   if (state.currentPage === "auth" || !state.currentUser) return <AuthPage />;
 
@@ -5542,6 +5716,7 @@ export default function App() {
   return (
     <AppContext.Provider value={{ state, dispatch }}>
       <ToastContainer />
+      <AdminOrderNotifier />
       <AppRouter />
     </AppContext.Provider>
   );

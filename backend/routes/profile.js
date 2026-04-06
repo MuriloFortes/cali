@@ -4,7 +4,8 @@ import fs from "fs";
 import { db } from "../database.js";
 import { authenticate } from "../middleware/auth.js";
 import { uploadAvatar } from "../upload.js";
-import { sendSmsCode, generateCode, codeExpiresAt } from "../services/sms.js";
+import { generateCode, codeExpiresAt } from "../services/sms.js";
+import { sendEmailCode } from "../services/email.js";
 
 const router = Router();
 
@@ -107,8 +108,9 @@ router.post("/phone/send-code", authenticate, async (req, res, next) => {
       "INSERT INTO sms_codes (user_id, phone, code, expires_at, verified, attempts) VALUES (?, ?, ?, ?, 0, 0)"
     ).run(req.user.id, phone, code, expiresAt);
 
-    await sendSmsCode(phone, code);
-    res.status(200).json({ success: true, expiresIn: 600 });
+    const userRow = db.prepare("SELECT email FROM users WHERE id = ?").get(req.user.id);
+    await sendEmailCode(userRow.email, code);
+    res.status(200).json({ success: true, expiresIn: 600, channel: "email" });
   } catch (err) {
     next(err);
   }

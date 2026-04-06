@@ -2,8 +2,9 @@ import { Router } from "express";
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import { db } from "../database.js";
-import { sendSmsCode, generateCode, codeExpiresAt } from "../services/sms.js";
+import { generateCode, codeExpiresAt } from "../services/sms.js";
 import { sendEmailCode } from "../services/email.js";
+import { isAdminIpAllowed } from "../utils/ipAllowlist.js";
 
 const router = Router();
 const JWT_SECRET = process.env.JWT_SECRET || "novamart-secret-dev";
@@ -40,50 +41,34 @@ router.post("/login", async (req, res) => {
     return res.status(401).json({ error: true, message: "E-mail ou senha incorretos" });
   }
 
-  // Admin pode logar sem 2FA
+  // Admin: sem 2FA, mas só a partir de IPs permitidos (VPN / lista em ADMIN_ALLOWED_IPS)
   if (user.role === "admin") {
+    if (!isAdminIpAllowed(req)) {
+      return res.status(403).json({
+        error: true,
+        message:
+          "Acesso de administrador permitido apenas pela rede autorizada (VPN). Verifique ADMIN_ALLOWED_IPS no servidor.",
+      });
+    }
     const token = generateToken(user.id);
     return res.status(200).json({ user: userToResponse(user), token });
   }
 
-  // Demais usuários: exigir 2FA via SMS (ou e-mail, em modo mock)
-  const phone = user.phone;
-  const phoneDigits = (phone != null ? String(phone) : "").replace(/\D/g, "");
-  const pref = preferredChannel === "email" ? "email" : preferredChannel === "sms" ? "sms" : null;
-  let channel = "email";
-  if (pref === "sms" && phoneDigits.length >= 10) channel = "sms";
-  else if (pref === "email") channel = "email";
-  else channel = phoneDigits.length >= 10 ? "sms" : "email";
-
+  // Demais usuários: 2FA somente por e-mail
   const code = generateCode();
   const expiresAt = codeExpiresAt(10);
 
   db.prepare(
     "INSERT INTO sms_codes (user_id, phone, code, expires_at, verified, attempts) VALUES (?, ?, ?, ?, 0, 0)"
-  ).run(user.id, channel === "sms" ? phone : user.email, code, expiresAt);
+  ).run(user.id, user.email, code, expiresAt);
 
   try {
-    if (channel === "sms") {
-      try {
-        await sendSmsCode(phone, code);
-      } catch (smsErr) {
-        console.error("Erro ao enviar SMS, tentando e-mail:", smsErr);
-        await sendEmailCode(user.email, code);
-        channel = "email";
-      }
-    } else {
-      await sendEmailCode(user.email, code);
-    }
+    await sendEmailCode(user.email, code);
   } catch (err) {
     console.error("Erro ao enviar código 2FA:", err);
     return res.status(500).json({ error: true, message: "Não foi possível enviar o código de verificação" });
   }
 
-  const maskPhone = (p) => {
-    const d = (p || "").replace(/\D/g, "");
-    if (d.length < 10) return p || "";
-    return `(${d.slice(0, 2)}) ${d.slice(2, 7)}-${d.slice(7, 11)}`;
-  };
   const maskEmail = (e) => {
     if (!e) return "";
     const [userPart, domain] = e.split("@");
@@ -92,14 +77,12 @@ router.post("/login", async (req, res) => {
     return `${userPart[0]}***${userPart[userPart.length - 1]}@${domain}`;
   };
 
-  const contact = channel === "sms" ? maskPhone(phone) : maskEmail(user.email);
+  const contact = maskEmail(user.email);
 
   return res.status(200).json({
     twoFactorRequired: true,
-    channel,
+    channel: "email",
     contact,
-    // Em modo mock, devolvemos o código para facilitar testes
-    mockCode: code,
   });
 });
 
