@@ -1,0 +1,39 @@
+# Dependências
+node_modules/
+
+# Build (Vite)
+dist/
+build/
+
+# Variáveis de ambiente (nunca commitar segredos)
+.env
+.env.local
+.env.*.local
+
+# Logs
+*.log
+npm-debug.log*
+logs/
+
+# Cache / ferramentas
+.vite/
+.cache/
+*.tsbuildinfo
+
+# Testes / cobertura
+coverage/
+
+# SO
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# IDE / editor
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Opcional: ficheiros temporários
+*.tmp
+*.temp
