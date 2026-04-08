@@ -18,7 +18,7 @@ initDatabase();
 const app = express();
 const PORT = process.env.PORT || 3002;
 
-// Atrás do Nginx / proxy: necessário para IP real em ADMIN_ALLOWED_IPS e logs
+// Atrás do Nginx / proxy: IP real em logs e cabeçalhos X-Forwarded-*
 app.set("trust proxy", 1);
 
 const corsOrigin = process.env.CORS_ORIGIN || "http://localhost:5173";

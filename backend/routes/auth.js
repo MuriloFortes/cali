@@ -4,7 +4,6 @@ import jwt from "jsonwebtoken";
 import { db } from "../database.js";
 import { generateCode, codeExpiresAt } from "../services/sms.js";
 import { sendEmailCode } from "../services/email.js";
-import { isAdminIpAllowed } from "../utils/ipAllowlist.js";
 
 const router = Router();
 const JWT_SECRET = process.env.JWT_SECRET || "novamart-secret-dev";
@@ -41,15 +40,8 @@ router.post("/login", async (req, res) => {
     return res.status(401).json({ error: true, message: "E-mail ou senha incorretos" });
   }
 
-  // Admin: sem 2FA, mas só a partir de IPs permitidos (VPN / lista em ADMIN_ALLOWED_IPS)
+  // Admin: sem 2FA, a partir de qualquer IP
   if (user.role === "admin") {
-    if (!isAdminIpAllowed(req)) {
-      return res.status(403).json({
-        error: true,
-        message:
-          "Acesso de administrador permitido apenas pela rede autorizada (VPN). Verifique ADMIN_ALLOWED_IPS no servidor.",
-      });
-    }
     const token = generateToken(user.id);
     return res.status(200).json({ user: userToResponse(user), token });
   }
