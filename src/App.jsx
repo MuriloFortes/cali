@@ -5649,6 +5649,13 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // Título da guia do navegador = nome da loja (Configurações do site / admin)
+  useEffect(() => {
+    const raw = state.siteConfig?.storeName;
+    const name = typeof raw === "string" ? raw.trim() : "";
+    document.title = name || "NovaMart";
+  }, [state.siteConfig?.storeName]);
+
   // Aplica dinamicamente as cores configuradas (Admin > Configurações do Site)
   // em TODOS os botões do site, evitando que fiquem presos ao violeta/indigo fixo.
   useEffect(() => {
