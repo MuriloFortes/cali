@@ -1623,12 +1623,6 @@ function AuthPage() {
               {errors.password && <p className="text-rose-400 text-xs mt-1">{errors.password}</p>}
             </div>
 
-            <div className="rounded-lg border border-indigo-500/15 p-3 text-xs text-indigo-300/70" style={{ background: "rgba(99,102,241,0.06)" }}>
-                <p className="font-semibold mb-1 text-indigo-300/90">🔑 Credenciais de teste:</p>
-                <p>Admin: admin@loja.com / admin123</p>
-                <p>Cliente: cliente@loja.com / 123456</p>
-            </div>
-
             <button onClick={handleLogin} disabled={loading || twoFactor}
               style={getButtonPrimaryGradientStyle(state.siteConfig)}
               className="w-full py-3 rounded-xl text-white font-semibold text-sm shadow-lg shadow-black/30 hover:opacity-95 transition-all duration-300 disabled:opacity-50 flex items-center justify-center gap-2">
