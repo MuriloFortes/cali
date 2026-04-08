@@ -1575,60 +1575,74 @@ function AuthPage() {
           </div>
 
           <div className="p-6 space-y-4">
-            {errors.general && (
-              <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-rose-500/10 border border-rose-500/20 text-rose-400 text-sm">
-                <span>⚠</span> {errors.general}
-              </div>
-            )}
+            <form
+              className="space-y-4"
+              onSubmit={(e) => {
+                e.preventDefault();
+                if (twoFactor) return;
+                handleLogin();
+              }}
+            >
+              {errors.general && (
+                <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-rose-500/10 border border-rose-500/20 text-rose-400 text-sm">
+                  <span>⚠</span> {errors.general}
+                </div>
+              )}
 
-            <div>
-              <label className="block text-xs font-medium text-zinc-400 mb-1.5 tracking-wide uppercase">E-mail</label>
-              <div className="relative">
-                <Mail size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500" />
-                <input
-                  type="email"
-                  placeholder="seu@email.com"
-                  value={form.email}
-                  onChange={e => set("email", e.target.value)}
-                  disabled={twoFactor}
-                  className={`w-full pl-10 pr-4 py-3 rounded-xl bg-white/5 border text-white placeholder-zinc-600 text-sm transition-all focus:outline-none focus:ring-2 focus:ring-violet-500/40 ${
-                    errors.email ? "border-rose-500/50" : "border-white/10 hover:border-white/20"
-                  } ${twoFactor ? "opacity-60 cursor-not-allowed" : ""}`}
-                />
+              <div>
+                <label className="block text-xs font-medium text-zinc-400 mb-1.5 tracking-wide uppercase">E-mail</label>
+                <div className="relative">
+                  <Mail size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500" />
+                  <input
+                    type="email"
+                    placeholder="seu@email.com"
+                    value={form.email}
+                    onChange={e => set("email", e.target.value)}
+                    disabled={twoFactor}
+                    autoComplete="email"
+                    className={`w-full pl-10 pr-4 py-3 rounded-xl bg-white/5 border text-white placeholder-zinc-600 text-sm transition-all focus:outline-none focus:ring-2 focus:ring-violet-500/40 ${
+                      errors.email ? "border-rose-500/50" : "border-white/10 hover:border-white/20"
+                    } ${twoFactor ? "opacity-60 cursor-not-allowed" : ""}`}
+                  />
+                </div>
+                {errors.email && <p className="text-rose-400 text-xs mt-1">{errors.email}</p>}
               </div>
-              {errors.email && <p className="text-rose-400 text-xs mt-1">{errors.email}</p>}
-            </div>
 
-            <div>
-              <label className="block text-xs font-medium text-zinc-400 mb-1.5 tracking-wide uppercase">Senha</label>
-              <div className="relative">
-                <Lock size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500" />
-                <input
-                  type={showPassword ? "text" : "password"}
-                  placeholder="••••••••"
-                  value={form.password}
-                  onChange={e => set("password", e.target.value)}
-                  disabled={twoFactor}
-                  className={`w-full pl-10 pr-10 py-3 rounded-xl bg-white/5 border text-white placeholder-zinc-600 text-sm transition-all focus:outline-none focus:ring-2 focus:ring-violet-500/40 ${
-                    errors.password ? "border-rose-500/50" : "border-white/10 hover:border-white/20"
-                  } ${twoFactor ? "opacity-60 cursor-not-allowed" : ""}`}
-                />
-                <button
-                  type="button"
-                  onClick={() => setShowPassword(s => !s)}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-zinc-500 hover:text-zinc-300"
-                >
-                  {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
-                </button>
+              <div>
+                <label className="block text-xs font-medium text-zinc-400 mb-1.5 tracking-wide uppercase">Senha</label>
+                <div className="relative">
+                  <Lock size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500" />
+                  <input
+                    type={showPassword ? "text" : "password"}
+                    placeholder="••••••••"
+                    value={form.password}
+                    onChange={e => set("password", e.target.value)}
+                    disabled={twoFactor}
+                    autoComplete="current-password"
+                    className={`w-full pl-10 pr-10 py-3 rounded-xl bg-white/5 border text-white placeholder-zinc-600 text-sm transition-all focus:outline-none focus:ring-2 focus:ring-violet-500/40 ${
+                      errors.password ? "border-rose-500/50" : "border-white/10 hover:border-white/20"
+                    } ${twoFactor ? "opacity-60 cursor-not-allowed" : ""}`}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowPassword(s => !s)}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-zinc-500 hover:text-zinc-300"
+                  >
+                    {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+                  </button>
+                </div>
+                {errors.password && <p className="text-rose-400 text-xs mt-1">{errors.password}</p>}
               </div>
-              {errors.password && <p className="text-rose-400 text-xs mt-1">{errors.password}</p>}
-            </div>
 
-            <button onClick={handleLogin} disabled={loading || twoFactor}
-              style={getButtonPrimaryGradientStyle(state.siteConfig)}
-              className="w-full py-3 rounded-xl text-white font-semibold text-sm shadow-lg shadow-black/30 hover:opacity-95 transition-all duration-300 disabled:opacity-50 flex items-center justify-center gap-2">
-              {loading ? <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" /> : <>Entrar <ArrowRight size={16} /></>}
-            </button>
+              <button
+                type="submit"
+                disabled={loading || twoFactor}
+                style={getButtonPrimaryGradientStyle(state.siteConfig)}
+                className="w-full py-3 rounded-xl text-white font-semibold text-sm shadow-lg shadow-black/30 hover:opacity-95 transition-all duration-300 disabled:opacity-50 flex items-center justify-center gap-2"
+              >
+                {loading ? <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" /> : <>Entrar <ArrowRight size={16} /></>}
+              </button>
+            </form>
 
             {twoFactor && (
               <div className="mt-4 rounded-xl border border-emerald-500/30 bg-emerald-500/5 p-4 space-y-3">
