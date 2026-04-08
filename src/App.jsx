@@ -1,4 +1,5 @@
-import { useState, useReducer, useContext, createContext, useEffect, useRef } from "react";
+import { useState, useReducer, useContext, createContext, useEffect, useLayoutEffect, useRef } from "react";
+import { formatTabTitle } from "./utils/tabTitle.js";
 import {
   ShoppingCart, Search, User, ChevronDown, LogOut, Package,
   Shield, Eye, EyeOff, Mail, Lock, UserPlus, LogIn,
@@ -3733,6 +3734,11 @@ function ProfilePage() {
   const { state, dispatch } = useApp();
   const [editingName, setEditingName] = useState(false);
   const [nameValue, setNameValue] = useState(state.currentUser?.name || "");
+  const [pwdCurrent, setPwdCurrent] = useState("");
+  const [pwdNew, setPwdNew] = useState("");
+  const [pwdConfirm, setPwdConfirm] = useState("");
+  const [pwdLoading, setPwdLoading] = useState(false);
+  const [showPwdFields, setShowPwdFields] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -3786,6 +3792,33 @@ function ProfilePage() {
       setEditingName(false);
     } catch (err) {
       dispatch({ type: "ADD_TOAST", payload: { type: "error", message: err.message || "Erro ao atualizar nome" } });
+    }
+  };
+
+  const handleChangePassword = async () => {
+    if (pwdNew.length < 6) {
+      dispatch({ type: "ADD_TOAST", payload: { type: "warning", message: "A nova senha deve ter no mínimo 6 caracteres." } });
+      return;
+    }
+    if (pwdNew !== pwdConfirm) {
+      dispatch({ type: "ADD_TOAST", payload: { type: "warning", message: "A confirmação não coincide com a nova senha." } });
+      return;
+    }
+    setPwdLoading(true);
+    try {
+      await api(
+        "/profile/password",
+        { method: "POST", body: { currentPassword: pwdCurrent, newPassword: pwdNew } },
+        dispatch
+      );
+      dispatch({ type: "ADD_TOAST", payload: { type: "success", message: "Senha alterada com sucesso." } });
+      setPwdCurrent("");
+      setPwdNew("");
+      setPwdConfirm("");
+    } catch (err) {
+      dispatch({ type: "ADD_TOAST", payload: { type: "error", message: err.message || "Não foi possível alterar a senha" } });
+    } finally {
+      setPwdLoading(false);
     }
   };
 
@@ -3878,6 +3911,76 @@ function ProfilePage() {
               </div>
             </div>
           </div>
+        </div>
+
+        <div className="rounded-2xl border border-white/[0.08] p-6 space-y-4" style={{ background: "rgba(255,255,255,0.03)" }}>
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+            <div>
+              <h2 className="text-sm font-semibold text-white flex items-center gap-2">
+                <Lock size={16} className="text-violet-400" /> Alterar senha
+              </h2>
+              <p className="text-xs text-zinc-500 mt-0.5">Use uma senha forte e não reutilize em outros sites.</p>
+            </div>
+            <button
+              type="button"
+              onClick={() => setShowPwdFields((s) => !s)}
+              className="self-start sm:self-auto px-3 py-1.5 rounded-lg border border-white/10 text-xs text-zinc-300 hover:bg-white/5"
+            >
+              {showPwdFields ? "Ocultar" : "Alterar senha"}
+            </button>
+          </div>
+          {showPwdFields && (
+            <div className="space-y-3 max-w-md">
+              <div>
+                <label className="block text-xs text-zinc-500 mb-1">Senha atual</label>
+                <input
+                  type="password"
+                  autoComplete="current-password"
+                  value={pwdCurrent}
+                  onChange={(e) => setPwdCurrent(e.target.value)}
+                  className="w-full px-3 py-2.5 rounded-xl bg-white/5 border border-white/10 text-sm text-white placeholder-zinc-600 focus:outline-none focus:ring-2 focus:ring-violet-500/40"
+                  placeholder="••••••••"
+                />
+              </div>
+              <div>
+                <label className="block text-xs text-zinc-500 mb-1">Nova senha (mín. 6 caracteres)</label>
+                <input
+                  type="password"
+                  autoComplete="new-password"
+                  value={pwdNew}
+                  onChange={(e) => setPwdNew(e.target.value)}
+                  className="w-full px-3 py-2.5 rounded-xl bg-white/5 border border-white/10 text-sm text-white placeholder-zinc-600 focus:outline-none focus:ring-2 focus:ring-violet-500/40"
+                  placeholder="••••••••"
+                />
+              </div>
+              <div>
+                <label className="block text-xs text-zinc-500 mb-1">Confirmar nova senha</label>
+                <input
+                  type="password"
+                  autoComplete="new-password"
+                  value={pwdConfirm}
+                  onChange={(e) => setPwdConfirm(e.target.value)}
+                  className="w-full px-3 py-2.5 rounded-xl bg-white/5 border border-white/10 text-sm text-white placeholder-zinc-600 focus:outline-none focus:ring-2 focus:ring-violet-500/40"
+                  placeholder="••••••••"
+                />
+              </div>
+              <button
+                type="button"
+                disabled={pwdLoading || !pwdCurrent || !pwdNew || !pwdConfirm}
+                onClick={handleChangePassword}
+                style={getButtonPrimaryGradientStyle(state.siteConfig)}
+                className="px-4 py-2.5 rounded-xl text-white text-sm font-semibold disabled:opacity-50 flex items-center gap-2"
+              >
+                {pwdLoading ? (
+                  <>
+                    <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" /> Salvando...
+                  </>
+                ) : (
+                  "Salvar nova senha"
+                )}
+              </button>
+            </div>
+          )}
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
@@ -5649,12 +5752,13 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Título da guia do navegador = nome da loja (Configurações do site / admin)
-  useEffect(() => {
+  // Título da guia = nome da loja (sanitizado: sem emoji / sufixo "E-Commerce" legado)
+  useLayoutEffect(() => {
+    if (!state.siteConfigLoaded) return;
     const raw = state.siteConfig?.storeName;
     const name = typeof raw === "string" ? raw.trim() : "";
-    document.title = name || "NovaMart";
-  }, [state.siteConfig?.storeName]);
+    document.title = formatTabTitle(name || "NovaMart");
+  }, [state.siteConfigLoaded, state.siteConfig?.storeName]);
 
   // Aplica dinamicamente as cores configuradas (Admin > Configurações do Site)
   // em TODOS os botões do site, evitando que fiquem presos ao violeta/indigo fixo.

@@ -1,6 +1,7 @@
 import { Router } from "express";
 import path from "path";
 import fs from "fs";
+import bcrypt from "bcryptjs";
 import { db } from "../database.js";
 import { authenticate } from "../middleware/auth.js";
 import { uploadAvatar } from "../upload.js";
@@ -168,6 +169,27 @@ router.get("/phone/status", authenticate, (req, res) => {
     "SELECT phone, phone_verified FROM users WHERE id = ?"
   ).get(req.user.id);
   res.json({ phone: row?.phone ?? null, verified: row?.phone_verified === 1 });
+});
+
+router.post("/password", authenticate, (req, res) => {
+  const currentPassword = String(req.body?.currentPassword ?? "");
+  const newPassword = String(req.body?.newPassword ?? "");
+  if (!currentPassword || !newPassword) {
+    return res.status(400).json({ message: "Senha atual e nova senha são obrigatórias" });
+  }
+  if (newPassword.length < 6) {
+    return res.status(400).json({ message: "A nova senha deve ter no mínimo 6 caracteres" });
+  }
+  const user = db.prepare("SELECT id, password_hash FROM users WHERE id = ?").get(req.user.id);
+  if (!user) {
+    return res.status(404).json({ message: "Usuário não encontrado" });
+  }
+  if (!bcrypt.compareSync(currentPassword, user.password_hash)) {
+    return res.status(400).json({ message: "Senha atual incorreta" });
+  }
+  const hash = bcrypt.hashSync(newPassword, 10);
+  db.prepare("UPDATE users SET password_hash = ?, updated_at = datetime('now') WHERE id = ?").run(hash, req.user.id);
+  res.json({ success: true, message: "Senha alterada com sucesso" });
 });
 
 export default router;
