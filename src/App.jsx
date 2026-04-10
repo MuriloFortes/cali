@@ -1,8 +1,9 @@
 import { useState, useReducer, useContext, createContext, useEffect, useLayoutEffect, useRef } from "react";
 import { formatTabTitle } from "./utils/tabTitle.js";
+import { startRegistration, startAuthentication } from "@simplewebauthn/browser";
 import {
   ShoppingCart, Search, User, ChevronDown, LogOut, Package,
-  Shield, Eye, EyeOff, Mail, Lock, UserPlus, LogIn,
+  Shield, Eye, EyeOff, Mail, Lock, UserPlus, LogIn, Fingerprint,
   ArrowRight, Store, Settings, X, Menu, Filter, LayoutGrid, List,
   ChevronUp, CheckCircle, AlertTriangle, XCircle, Info, Trash2,
   MapPin, Home, Hash, Building, Map, CreditCard, FileText, Copy, Zap,
@@ -17,24 +18,25 @@ import {
 const API = "/api";
 
 async function api(endpoint, options = {}, dispatch = null) {
-  const token = sessionStorage.getItem("novamart_token");
+  const { bearerToken, ...rest } = options;
+  const token = bearerToken !== undefined ? bearerToken : sessionStorage.getItem("novamart_token");
   // Detecta FormData de forma mais robusta para uploads.
   // Alguns ambientes/bundlers podem quebrar o `instanceof FormData`.
   const isFormData =
-    !!options.body &&
+    !!rest.body &&
     (typeof FormData !== "undefined"
-      ? options.body instanceof FormData
-      : options.body?.constructor?.name === "FormData") ||
-    !!options.body?.append && typeof options.body.append === "function";
+      ? rest.body instanceof FormData
+      : rest.body?.constructor?.name === "FormData") ||
+    !!rest.body?.append && typeof rest.body.append === "function";
   const config = {
     headers: {
       ...(isFormData ? {} : { "Content-Type": "application/json" }),
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
     },
-    ...options,
+    ...rest,
   };
-  if (options.body != null) {
-    config.body = isFormData ? options.body : (typeof options.body === "object" ? JSON.stringify(options.body) : options.body);
+  if (rest.body != null) {
+    config.body = isFormData ? rest.body : (typeof rest.body === "object" ? JSON.stringify(rest.body) : rest.body);
   }
   const res = await fetch(`${API}${endpoint}`, config);
   let data;
@@ -1485,6 +1487,11 @@ function AuthPage() {
   const [twoFactorError, setTwoFactorError] = useState(null);
   const [twoFactorContact, setTwoFactorContact] = useState("");
   const [twoFactorLoading, setTwoFactorLoading] = useState(false);
+  const [webAuthnPending, setWebAuthnPending] = useState(false);
+  const [pendingToken, setPendingToken] = useState(null);
+  const [webAuthnMode, setWebAuthnMode] = useState("registration");
+  const [webAuthnLoading, setWebAuthnLoading] = useState(false);
+  const [webAuthnError, setWebAuthnError] = useState(null);
   const codeInputsRef = useRef([]);
 
   const storeLogoImageUrl = state.siteConfig?.storeLogoImageUrl || "";
@@ -1518,7 +1525,12 @@ function AuthPage() {
         setTimeout(() => {
           codeInputsRef.current[0]?.focus();
         }, 0);
-      } else {
+      } else if (data.webAuthnPending && data.pendingToken) {
+        setWebAuthnPending(true);
+        setPendingToken(data.pendingToken);
+        setWebAuthnMode(data.webAuthnMode === "authentication" ? "authentication" : "registration");
+        setWebAuthnError(null);
+      } else if (data.token && data.user) {
         sessionStorage.setItem("novamart_token", data.token);
         dispatch({ type: "LOGIN", payload: data.user });
         dispatch({ type: "ADD_TOAST", payload: { type: "success", message: `Bem-vindo(a), ${data.user.name}! 👋` } });
@@ -1535,6 +1547,44 @@ function AuthPage() {
     } finally {
       setLoading(false);
     }
+  };
+
+  const completeWebAuthn = async () => {
+    if (!pendingToken) return;
+    setWebAuthnLoading(true);
+    setWebAuthnError(null);
+    try {
+      if (webAuthnMode === "registration") {
+        const opts = await api("/auth/webauthn/register-options", { method: "POST", bearerToken: pendingToken }, dispatch);
+        const att = await startRegistration({ optionsJSON: opts });
+        const data = await api("/auth/webauthn/register-verify", { method: "POST", body: att, bearerToken: pendingToken }, dispatch);
+        sessionStorage.setItem("novamart_token", data.token);
+        dispatch({ type: "LOGIN", payload: data.user });
+        dispatch({ type: "ADD_TOAST", payload: { type: "success", message: `Bem-vindo(a), ${data.user.name}! 👋` } });
+      } else {
+        const opts = await api("/auth/webauthn/login-options", { method: "POST", bearerToken: pendingToken }, dispatch);
+        const asse = await startAuthentication({ optionsJSON: opts });
+        const data = await api("/auth/webauthn/login-verify", { method: "POST", body: asse, bearerToken: pendingToken }, dispatch);
+        sessionStorage.setItem("novamart_token", data.token);
+        dispatch({ type: "LOGIN", payload: data.user });
+        dispatch({ type: "ADD_TOAST", payload: { type: "success", message: `Bem-vindo(a), ${data.user.name}! 👋` } });
+      }
+      setWebAuthnPending(false);
+      setPendingToken(null);
+    } catch (err) {
+      const msg = err.message || "Não foi possível concluir a verificação biométrica.";
+      setWebAuthnError(msg);
+      dispatch({ type: "ADD_TOAST", payload: { type: "error", message: msg } });
+    } finally {
+      setWebAuthnLoading(false);
+    }
+  };
+
+  const cancelWebAuthn = () => {
+    setWebAuthnPending(false);
+    setPendingToken(null);
+    setWebAuthnError(null);
+    setWebAuthnLoading(false);
   };
 
   return (
@@ -1575,6 +1625,48 @@ function AuthPage() {
           </div>
 
           <div className="p-6 space-y-4">
+            {webAuthnPending ? (
+              <div className="space-y-4">
+                <div className="rounded-xl border border-violet-500/30 bg-violet-500/5 p-4 space-y-3 text-center">
+                  <Fingerprint className="mx-auto text-violet-400" size={40} strokeWidth={1.5} />
+                  <p className="text-sm font-semibold text-zinc-100">
+                    {webAuthnMode === "registration"
+                      ? "Registe a biometria neste dispositivo"
+                      : "Confirme a sua identidade"}
+                  </p>
+                  <p className="text-xs text-zinc-400 leading-relaxed">
+                    {webAuthnMode === "registration"
+                      ? "É obrigatório no primeiro acesso. Apenas um dispositivo pode manter sessão ativa por vez."
+                      : "Use o mesmo método (impressão digital, rosto ou chave de segurança) que já registou."}
+                  </p>
+                  {webAuthnError && (
+                    <p className="text-xs text-rose-400">{webAuthnError}</p>
+                  )}
+                  <button
+                    type="button"
+                    onClick={completeWebAuthn}
+                    disabled={webAuthnLoading}
+                    style={getButtonPrimaryGradientStyle(state.siteConfig)}
+                    className="w-full py-3 rounded-xl text-white font-semibold text-sm shadow-lg shadow-black/30 hover:opacity-95 transition-all duration-300 disabled:opacity-50 flex items-center justify-center gap-2"
+                  >
+                    {webAuthnLoading ? (
+                      <><div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" /> A aguardar o dispositivo...</>
+                    ) : (
+                      <><Fingerprint size={18} /> Continuar com biometria</>
+                    )}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={cancelWebAuthn}
+                    disabled={webAuthnLoading}
+                    className="w-full py-2 rounded-xl border border-white/10 text-zinc-300 text-xs"
+                  >
+                    Voltar
+                  </button>
+                </div>
+              </div>
+            ) : (
+            <>
             <form
               className="space-y-4"
               onSubmit={(e) => {
@@ -1699,9 +1791,17 @@ function AuthPage() {
                         method: "POST",
                         body: { email: form.email.trim(), code: twoFactorCode.join("") },
                       }, dispatch);
-                      sessionStorage.setItem("novamart_token", data.token);
-                      dispatch({ type: "LOGIN", payload: data.user });
-                      dispatch({ type: "ADD_TOAST", payload: { type: "success", message: `Bem-vindo(a), ${data.user.name}! 👋` } });
+                      if (data.webAuthnPending && data.pendingToken) {
+                        setWebAuthnPending(true);
+                        setPendingToken(data.pendingToken);
+                        setWebAuthnMode(data.webAuthnMode === "authentication" ? "authentication" : "registration");
+                        setTwoFactor(false);
+                        setWebAuthnError(null);
+                      } else if (data.token && data.user) {
+                        sessionStorage.setItem("novamart_token", data.token);
+                        dispatch({ type: "LOGIN", payload: data.user });
+                        dispatch({ type: "ADD_TOAST", payload: { type: "success", message: `Bem-vindo(a), ${data.user.name}! 👋` } });
+                      }
                     } catch (err) {
                       setTwoFactorError(err.message || "Erro ao verificar código");
                     } finally {
@@ -1721,6 +1821,8 @@ function AuthPage() {
                   Cancelar verificação
                 </button>
               </div>
+            )}
+            </>
             )}
           </div>
         </div>

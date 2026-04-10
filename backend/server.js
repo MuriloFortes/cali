@@ -4,6 +4,7 @@ import path from "path";
 import cors from "cors";
 import { initDatabase } from "./database.js";
 import authRoutes from "./routes/auth.js";
+import webauthnRoutes from "./routes/webauthn.js";
 import productsRoutes from "./routes/products.js";
 import usersRoutes from "./routes/users.js";
 import ordersRoutes, { getInventory } from "./routes/orders.js";
@@ -39,6 +40,7 @@ app.use((req, res, next) => {
 });
 
 app.use("/api/auth", authRoutes);
+app.use("/api/auth", webauthnRoutes);
 app.use("/api/products", productsRoutes);
 app.use("/api/users", usersRoutes);
 app.use("/api/orders", ordersRoutes);

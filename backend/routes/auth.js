@@ -1,31 +1,25 @@
 import { Router } from "express";
 import bcrypt from "bcryptjs";
-import jwt from "jsonwebtoken";
 import { db } from "../database.js";
 import { generateCode, codeExpiresAt } from "../services/sms.js";
 import { sendEmailCode } from "../services/email.js";
+import {
+  generatePendingToken,
+  generateAccessToken,
+  rotateSessionToken,
+  userToResponse,
+  isWebAuthnDisabled,
+} from "../utils/jwtAuth.js";
 
 const router = Router();
-const JWT_SECRET = process.env.JWT_SECRET || "novamart-secret-dev";
-const JWT_EXPIRES = "24h";
 
-function generateToken(userId) {
-  return jwt.sign({ userId }, JWT_SECRET, { expiresIn: JWT_EXPIRES });
-}
-
-function userToResponse(row) {
-  return {
-    id: row.id,
-    name: row.name,
-    email: row.email,
-    phone: row.phone,
-    role: row.role,
-    active: row.active === 1,
-  };
+function hasWebAuthnCredential(userId) {
+  const row = db.prepare("SELECT COUNT(*) as n FROM webauthn_credentials WHERE user_id = ?").get(userId);
+  return (row?.n ?? 0) > 0;
 }
 
 router.post("/login", async (req, res) => {
-  const { email, password, channel: preferredChannel } = req.body ?? {};
+  const { email, password } = req.body ?? {};
   const user = db.prepare(
     "SELECT id, name, email, phone, password_hash, role, active FROM users WHERE email = ?"
   ).get(email);
@@ -40,13 +34,18 @@ router.post("/login", async (req, res) => {
     return res.status(401).json({ error: true, message: "E-mail ou senha incorretos" });
   }
 
-  // Admin: sem 2FA, a partir de qualquer IP
   if (user.role === "admin") {
-    const token = generateToken(user.id);
-    return res.status(200).json({ user: userToResponse(user), token });
+    if (isWebAuthnDisabled()) {
+      const sid = rotateSessionToken(user.id);
+      return res.status(200).json({ user: userToResponse(user), token: generateAccessToken(user.id, sid) });
+    }
+    return res.status(200).json({
+      webAuthnPending: true,
+      pendingToken: generatePendingToken(user.id),
+      webAuthnMode: hasWebAuthnCredential(user.id) ? "authentication" : "registration",
+    });
   }
 
-  // Demais usuários: 2FA somente por e-mail
   const code = generateCode();
   const expiresAt = codeExpiresAt(10);
 
@@ -111,8 +110,17 @@ router.post("/register", (req, res) => {
   const user = db.prepare(
     "SELECT id, name, email, phone, role, active FROM users WHERE id = ?"
   ).get(id);
-  const token = generateToken(user.id);
-  res.status(201).json({ user: userToResponse(user), token });
+
+  if (isWebAuthnDisabled()) {
+    const sid = rotateSessionToken(user.id);
+    return res.status(201).json({ user: userToResponse(user), token: generateAccessToken(user.id, sid) });
+  }
+
+  return res.status(201).json({
+    webAuthnPending: true,
+    pendingToken: generatePendingToken(user.id),
+    webAuthnMode: "registration",
+  });
 });
 
 router.post("/verify-2fa", (req, res) => {
@@ -161,8 +169,16 @@ router.post("/verify-2fa", (req, res) => {
 
   db.prepare("UPDATE sms_codes SET verified = 1 WHERE id = ?").run(entry.id);
 
-  const token = generateToken(user.id);
-  res.status(200).json({ user: userToResponse(user), token });
+  if (isWebAuthnDisabled()) {
+    const sid = rotateSessionToken(user.id);
+    return res.status(200).json({ user: userToResponse(user), token: generateAccessToken(user.id, sid) });
+  }
+
+  return res.status(200).json({
+    webAuthnPending: true,
+    pendingToken: generatePendingToken(user.id),
+    webAuthnMode: hasWebAuthnCredential(user.id) ? "authentication" : "registration",
+  });
 });
 
 export default router;

@@ -1,7 +1,6 @@
 import jwt from "jsonwebtoken";
 import { db } from "../database.js";
-
-const JWT_SECRET = process.env.JWT_SECRET || "novamart-secret-dev";
+import { JWT_SECRET } from "../utils/jwtAuth.js";
 
 export function authenticate(req, res, next) {
   const authHeader = req.headers.authorization;
@@ -11,8 +10,14 @@ export function authenticate(req, res, next) {
   const token = authHeader.slice(7);
   try {
     const payload = jwt.verify(token, JWT_SECRET);
+    if (payload.scope === "webauthn_pending") {
+      return res.status(401).json({ error: true, message: "Token inválido ou expirado" });
+    }
+    if (!payload.sid) {
+      return res.status(401).json({ error: true, message: "Faça login novamente (sessão antiga)" });
+    }
     const user = db.prepare(
-      "SELECT id, name, email, phone, role, active, created_at, updated_at FROM users WHERE id = ?"
+      "SELECT id, name, email, phone, role, active, created_at, updated_at, session_token FROM users WHERE id = ?"
     ).get(payload.userId);
     if (!user) {
       return res.status(401).json({ error: true, message: "Token inválido ou expirado" });
@@ -20,9 +25,15 @@ export function authenticate(req, res, next) {
     if (user.active !== 1) {
       return res.status(403).json({ error: true, message: "Conta desativada" });
     }
+    if (user.session_token !== payload.sid) {
+      return res.status(401).json({
+        error: true,
+        message: "Sessão encerrada: outro dispositivo iniciou sessão com esta conta.",
+      });
+    }
     req.user = user;
     next();
-  } catch (e) {
+  } catch {
     return res.status(401).json({ error: true, message: "Token inválido ou expirado" });
   }
 }

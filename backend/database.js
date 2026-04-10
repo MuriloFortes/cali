@@ -132,6 +132,8 @@ function runSchema() {
     "ALTER TABLE users ADD COLUMN avatar TEXT DEFAULT NULL",
     "ALTER TABLE users ADD COLUMN default_address TEXT DEFAULT NULL",
     "ALTER TABLE users ADD COLUMN save_address INTEGER DEFAULT 1",
+    "ALTER TABLE users ADD COLUMN session_token TEXT DEFAULT NULL",
+    "ALTER TABLE users ADD COLUMN webauthn_registered INTEGER DEFAULT 0",
   ];
 
   for (const sql of alterStatements) {
@@ -144,6 +146,19 @@ function runSchema() {
       }
     }
   }
+
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS webauthn_credentials (
+      id             TEXT PRIMARY KEY,
+      user_id        TEXT NOT NULL REFERENCES users(id),
+      credential_id  TEXT NOT NULL UNIQUE,
+      public_key     TEXT NOT NULL,
+      counter        INTEGER NOT NULL DEFAULT 0,
+      transports     TEXT,
+      created_at     TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_webauthn_credentials_user ON webauthn_credentials(user_id);
+  `);
 }
 
 function runSeed() {
@@ -319,6 +334,7 @@ export function initDatabase() {
 
 export function resetDatabase() {
   db.exec(`
+    DROP TABLE IF EXISTS webauthn_credentials;
     DROP TABLE IF EXISTS sms_codes;
     DROP TABLE IF EXISTS messages;
     DROP TABLE IF EXISTS conversations;
