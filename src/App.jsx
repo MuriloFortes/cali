@@ -1548,7 +1548,7 @@ function AuthPage() {
           dispatch({ type: "LOGIN", payload: data.user });
           dispatch({
             type: "ADD_TOAST",
-            payload: { type: "success", message: `Bem-vindo(a), ${data.user.name ?? "Utilizador"}! 👋` },
+            payload: { type: "success", message: `Bem-vindo(a), ${data.user?.name ?? "Utilizador"}! 👋` },
           });
         } else {
           setErrors({ general: "Resposta inesperada do servidor. Confirme se a API está atualizada (git pull + PM2)." });
@@ -1608,7 +1608,7 @@ function AuthPage() {
       dispatch({ type: "LOGIN", payload: data.user });
       dispatch({
         type: "ADD_TOAST",
-        payload: { type: "success", message: `Bem-vindo(a), ${data.user.name ?? "Utilizador"}! 👋` },
+        payload: { type: "success", message: `Bem-vindo(a), ${data.user?.name ?? "Utilizador"}! 👋` },
       });
       setWebAuthnPending(false);
       setPendingToken(null);
@@ -1856,7 +1856,7 @@ function AuthPage() {
                         dispatch({ type: "LOGIN", payload: data.user });
                         dispatch({
                           type: "ADD_TOAST",
-                          payload: { type: "success", message: `Bem-vindo(a), ${data.user.name ?? "Utilizador"}! 👋` },
+                          payload: { type: "success", message: `Bem-vindo(a), ${data.user?.name ?? "Utilizador"}! 👋` },
                         });
                       } else {
                         setTwoFactorError("Resposta inesperada após o código. Atualize a API (git pull + PM2) e o site (npm run build).");
@@ -3922,7 +3922,7 @@ function ProfilePage() {
       .then(data => {
         if (!cancelled && data.user) {
           dispatch({ type: "SET_PROFILE_DATA", payload: data.user });
-          setNameValue(data.user.name || "");
+          setNameValue(data.user?.name || "");
         }
       })
       .catch(err => {
@@ -5617,7 +5617,7 @@ function AdminUsers() {
           <div className="fixed inset-0 z-40 bg-black/60 animate-overlay-in" onClick={() => setOrdersModalUser(null)} />
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4 overflow-y-auto">
             <div className="rounded-2xl border border-white/10 bg-zinc-900 p-6 max-w-md w-full max-h-[80vh] overflow-y-auto animate-modal-in">
-              <h3 className="text-lg font-semibold text-white mb-4">Pedidos de {ordersModalUser.name}</h3>
+              <h3 className="text-lg font-semibold text-white mb-4">Pedidos de {ordersModalUser?.name ?? "—"}</h3>
               {userOrders.length === 0 ? <p className="text-zinc-500 text-sm">Nenhum pedido.</p> : <div className="space-y-3">{userOrders.map(o => { const cfg = STATUS_CONFIG[o.status]; return <div key={o.id} className="p-3 rounded-xl border border-white/10 bg-white/[0.02]"><div className="flex justify-between items-center"><span className="text-white font-medium">{o.id}</span><span className={`px-2 py-0.5 rounded text-xs ${cfg?.color}`}>{cfg?.label}</span></div><p className="text-zinc-500 text-xs mt-1">{formatDate(o.createdAt)} · {formatBRL(o.total)}</p></div>; })}</div>}
               <button onClick={() => setOrdersModalUser(null)} className="mt-4 w-full py-2 rounded-xl border border-white/10 text-zinc-300 text-sm">Fechar</button>
             </div>
@@ -5631,7 +5631,7 @@ function AdminUsers() {
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
             <div className="rounded-2xl border border-white/10 bg-zinc-900 p-6 max-w-sm w-full animate-modal-in">
               <h3 className="text-lg font-semibold text-white mb-2">{roleConfirm.newRole === "admin" ? "Promover a administrador?" : "Remover acesso admin?"}</h3>
-              <p className="text-zinc-400 text-sm mb-6">{roleConfirm.newRole === "admin" ? `Promover ${roleConfirm.user.name} a administrador? Terá acesso ao painel.` : `Remover acesso admin de ${roleConfirm.user.name}?`}</p>
+              <p className="text-zinc-400 text-sm mb-6">{roleConfirm.newRole === "admin" ? `Promover ${roleConfirm.user?.name ?? "utilizador"} a administrador? Terá acesso ao painel.` : `Remover acesso admin de ${roleConfirm.user?.name ?? "utilizador"}?`}</p>
               <div className="flex gap-3"><button onClick={() => setRoleConfirm(null)} className="flex-1 py-2.5 rounded-xl border border-white/10 text-zinc-300 text-sm">Cancelar</button><button onClick={() => handleChangeRole(roleConfirm.user, roleConfirm.newRole)} className="flex-1 py-2.5 rounded-xl bg-violet-600 text-white text-sm font-medium">Confirmar</button></div>
             </div>
           </div>
