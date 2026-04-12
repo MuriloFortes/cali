@@ -6,7 +6,8 @@ export const JWT_SECRET = process.env.JWT_SECRET || "novamart-secret-dev";
 export const JWT_EXPIRES = "24h";
 
 export function isWebAuthnDisabled() {
-  return process.env.WEBAUTHN_DISABLED === "1" || process.env.WEBAUTHN_DISABLED === "true";
+  const v = String(process.env.WEBAUTHN_DISABLED ?? "").trim().toLowerCase();
+  return v === "1" || v === "true" || v === "yes" || v === "on";
 }
 
 export function generatePendingToken(userId) {

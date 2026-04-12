@@ -1549,8 +1549,26 @@ function AuthPage() {
     }
   };
 
+  const getWebAuthnPrerequisiteError = () => {
+    if (typeof window === "undefined" || typeof window.PublicKeyCredential === "undefined") {
+      return "Este navegador não suporta passkeys/WebAuthn. Use Chrome, Edge ou Safari atualizado.";
+    }
+    const h = window.location.hostname;
+    const local = h === "localhost" || h === "127.0.0.1";
+    if (!window.isSecureContext && !local) {
+      return "Biometria exige HTTPS (ligação segura). Aceda com https:// no seu domínio ou configure certificado SSL no servidor. Em HTTP só funciona em localhost.";
+    }
+    return null;
+  };
+
   const completeWebAuthn = async () => {
     if (!pendingToken) return;
+    const preErr = getWebAuthnPrerequisiteError();
+    if (preErr) {
+      setWebAuthnError(preErr);
+      dispatch({ type: "ADD_TOAST", payload: { type: "error", message: preErr } });
+      return;
+    }
     setWebAuthnLoading(true);
     setWebAuthnError(null);
     try {
@@ -1572,7 +1590,11 @@ function AuthPage() {
       setWebAuthnPending(false);
       setPendingToken(null);
     } catch (err) {
-      const msg = err.message || "Não foi possível concluir a verificação biométrica.";
+      let msg = err.message || "Não foi possível concluir a verificação biométrica.";
+      if (/not supported|secure context|insecure/i.test(msg)) {
+        msg =
+          "Biometria não está disponível nesta ligação. Use HTTPS no domínio público ou outro browser atualizado.";
+      }
       setWebAuthnError(msg);
       dispatch({ type: "ADD_TOAST", payload: { type: "error", message: msg } });
     } finally {
@@ -1639,6 +1661,14 @@ function AuthPage() {
                       ? "É obrigatório no primeiro acesso. Apenas um dispositivo pode manter sessão ativa por vez."
                       : "Use o mesmo método (impressão digital, rosto ou chave de segurança) que já registou."}
                   </p>
+                  {typeof window !== "undefined" &&
+                    window.isSecureContext === false &&
+                    window.location.hostname !== "localhost" &&
+                    window.location.hostname !== "127.0.0.1" && (
+                    <p className="text-xs text-amber-300/95 text-center leading-relaxed px-1">
+                      Este site está em HTTP. Os browsers só permitem biometria com HTTPS (certificado SSL). Configure HTTPS no servidor (ex.: Let’s Encrypt + Nginx).
+                    </p>
+                  )}
                   {webAuthnError && (
                     <p className="text-xs text-rose-400">{webAuthnError}</p>
                   )}

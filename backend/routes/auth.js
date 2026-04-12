@@ -179,6 +179,9 @@ router.post("/verify-2fa", (req, res) => {
   db.prepare("UPDATE sms_codes SET verified = 1 WHERE id = ?").run(entry.id);
 
   if (isWebAuthnDisabled()) {
+    console.warn(
+      `[verify-2fa] WEBAUTHN_DISABLED está ativa — JWT direto sem passkey (${user.email}). Remova ou defina WEBAUTHN_DISABLED=0 no .env.`
+    );
     const sid = rotateSessionToken(user.id);
     return res.status(200).json({ user: userToResponse(user), token: generateAccessToken(user.id, sid) });
   }

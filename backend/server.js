@@ -13,6 +13,7 @@ import profileRoutes from "./routes/profile.js";
 import settingsRoutes from "./routes/settings.js";
 import cepRoutes from "./routes/cep.js";
 import { authenticate, requireAdmin } from "./middleware/auth.js";
+import { isWebAuthnDisabled } from "./utils/jwtAuth.js";
 
 initDatabase();
 
@@ -83,4 +84,9 @@ app.use((err, req, res, next) => {
 
 app.listen(PORT, () => {
   console.log(`🚀 NovaMart API rodando em http://localhost:${PORT}`);
+  if (isWebAuthnDisabled()) {
+    console.warn(
+      "[WebAuthn] DESATIVADA (WEBAUTHN_DISABLED). Pós-2FA e admin emitem JWT sem passkey. Remova a variável ou use WEBAUTHN_DISABLED=0 para exigir biometria."
+    );
+  }
 });
