@@ -16,12 +16,37 @@ import { setChallenge, takeChallenge } from "../services/webauthnChallenges.js";
 
 const router = Router();
 
-function getRpId() {
-  return process.env.WEBAUTHN_RP_ID || "localhost";
+/**
+ * RP ID tem de coincidir com o hostname onde o utilizador abre o site (sem porta, minúsculas).
+ * Se WEBAUTHN_RP_ID não estiver definido, usa Host / X-Forwarded-Host — evita ficar preso em "localhost" em produção.
+ */
+function getRpId(req) {
+  const fromEnv = process.env.WEBAUTHN_RP_ID;
+  if (fromEnv != null && String(fromEnv).trim() !== "") {
+    return String(fromEnv).trim().split(":")[0].toLowerCase();
+  }
+  if (!req) return "localhost";
+  const raw = (req.get("x-forwarded-host") || req.get("host") || "").split(",")[0].trim();
+  const host = raw.split(":")[0].toLowerCase();
+  return host || "localhost";
 }
 
 function getRpName() {
   return process.env.WEBAUTHN_RP_NAME || "NovaMart";
+}
+
+function getRequestOrigin(req) {
+  const o = req.headers.origin;
+  if (o) return o;
+  const ref = req.headers.referer;
+  if (ref && /^https?:\/\//i.test(ref)) {
+    try {
+      return new URL(ref).origin;
+    } catch {
+      /* ignore */
+    }
+  }
+  return null;
 }
 
 function userIdToBytes(uid) {
@@ -49,7 +74,7 @@ router.post("/webauthn/register-options", authenticatePendingWebAuthn, async (re
       return res.status(404).json({ error: true, message: "Usuário não encontrado" });
     }
 
-    const rpID = getRpId();
+    const rpID = getRpId(req);
     const options = await generateRegistrationOptions({
       rpName: getRpName(),
       rpID,
@@ -80,12 +105,15 @@ router.post("/webauthn/register-verify", authenticatePendingWebAuthn, async (req
       return res.status(400).json({ error: true, message: "Desafio expirado. Solicite novamente." });
     }
 
-    const origin = req.headers.origin;
+    const origin = getRequestOrigin(req);
     if (!origin) {
-      return res.status(400).json({ error: true, message: "Origin ausente" });
+      return res.status(400).json({
+        error: true,
+        message: "Origin ausente. Confirme proxy_set_header Origin $http_origin; no Nginx.",
+      });
     }
 
-    const rpID = getRpId();
+    const rpID = getRpId(req);
     const verification = await verifyRegistrationResponse({
       response: req.body,
       expectedChallenge,
@@ -143,7 +171,7 @@ router.post("/webauthn/login-options", authenticatePendingWebAuthn, async (req, 
       transports: r.transports ? JSON.parse(r.transports) : [],
     }));
 
-    const rpID = getRpId();
+    const rpID = getRpId(req);
     const options = await generateAuthenticationOptions({
       rpID,
       allowCredentials,
@@ -166,9 +194,12 @@ router.post("/webauthn/login-verify", authenticatePendingWebAuthn, async (req, r
       return res.status(400).json({ error: true, message: "Desafio expirado. Solicite novamente." });
     }
 
-    const origin = req.headers.origin;
+    const origin = getRequestOrigin(req);
     if (!origin) {
-      return res.status(400).json({ error: true, message: "Origin ausente" });
+      return res.status(400).json({
+        error: true,
+        message: "Origin ausente. Confirme proxy_set_header Origin $http_origin; no Nginx.",
+      });
     }
 
     const body = req.body;
@@ -185,7 +216,7 @@ router.post("/webauthn/login-verify", authenticatePendingWebAuthn, async (req, r
     }
 
     const credential = rowToCredential(row);
-    const rpID = getRpId();
+    const rpID = getRpId(req);
 
     const verification = await verifyAuthenticationResponse({
       response: body,
