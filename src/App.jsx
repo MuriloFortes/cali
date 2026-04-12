@@ -55,6 +55,17 @@ async function api(endpoint, options = {}, dispatch = null) {
   return data;
 }
 
+/** Resposta pós-login ou pós-2FA com passkey pendente (tolerância a `pending_token`). */
+function parseWebAuthnPendingPayload(body) {
+  if (!body?.webAuthnPending) return null;
+  const pendingToken = body.pendingToken ?? body.pending_token;
+  if (!pendingToken || typeof pendingToken !== "string") return null;
+  return {
+    pendingToken,
+    webAuthnMode: body.webAuthnMode === "authentication" ? "authentication" : "registration",
+  };
+}
+
 function formatPhone(value) {
   const digits = String(value || "").replace(/\D/g, "").slice(0, 11);
   if (digits.length <= 2) return digits ? `(${digits}` : "";
@@ -1525,15 +1536,23 @@ function AuthPage() {
         setTimeout(() => {
           codeInputsRef.current[0]?.focus();
         }, 0);
-      } else if (data.webAuthnPending && data.pendingToken) {
-        setWebAuthnPending(true);
-        setPendingToken(data.pendingToken);
-        setWebAuthnMode(data.webAuthnMode === "authentication" ? "authentication" : "registration");
-        setWebAuthnError(null);
-      } else if (data.token && data.user) {
-        sessionStorage.setItem("novamart_token", data.token);
-        dispatch({ type: "LOGIN", payload: data.user });
-        dispatch({ type: "ADD_TOAST", payload: { type: "success", message: `Bem-vindo(a), ${data.user.name}! 👋` } });
+      } else {
+        const pending = parseWebAuthnPendingPayload(data);
+        if (pending) {
+          setWebAuthnPending(true);
+          setPendingToken(pending.pendingToken);
+          setWebAuthnMode(pending.webAuthnMode);
+          setWebAuthnError(null);
+        } else if (data?.token && data?.user?.id) {
+          sessionStorage.setItem("novamart_token", data.token);
+          dispatch({ type: "LOGIN", payload: data.user });
+          dispatch({
+            type: "ADD_TOAST",
+            payload: { type: "success", message: `Bem-vindo(a), ${data.user.name ?? "Utilizador"}! 👋` },
+          });
+        } else {
+          setErrors({ general: "Resposta inesperada do servidor. Confirme se a API está atualizada (git pull + PM2)." });
+        }
       }
     } catch (err) {
       const msg =
@@ -1572,25 +1591,29 @@ function AuthPage() {
     setWebAuthnLoading(true);
     setWebAuthnError(null);
     try {
+      let data;
       if (webAuthnMode === "registration") {
         const opts = await api("/auth/webauthn/register-options", { method: "POST", bearerToken: pendingToken }, dispatch);
         const att = await startRegistration({ optionsJSON: opts });
-        const data = await api("/auth/webauthn/register-verify", { method: "POST", body: att, bearerToken: pendingToken }, dispatch);
-        sessionStorage.setItem("novamart_token", data.token);
-        dispatch({ type: "LOGIN", payload: data.user });
-        dispatch({ type: "ADD_TOAST", payload: { type: "success", message: `Bem-vindo(a), ${data.user.name}! 👋` } });
+        data = await api("/auth/webauthn/register-verify", { method: "POST", body: att, bearerToken: pendingToken }, dispatch);
       } else {
         const opts = await api("/auth/webauthn/login-options", { method: "POST", bearerToken: pendingToken }, dispatch);
         const asse = await startAuthentication({ optionsJSON: opts });
-        const data = await api("/auth/webauthn/login-verify", { method: "POST", body: asse, bearerToken: pendingToken }, dispatch);
-        sessionStorage.setItem("novamart_token", data.token);
-        dispatch({ type: "LOGIN", payload: data.user });
-        dispatch({ type: "ADD_TOAST", payload: { type: "success", message: `Bem-vindo(a), ${data.user.name}! 👋` } });
+        data = await api("/auth/webauthn/login-verify", { method: "POST", body: asse, bearerToken: pendingToken }, dispatch);
       }
+      if (!data?.token || !data?.user?.id) {
+        throw new Error("Resposta inválida do servidor após biometria (sem sessão). Tente novamente.");
+      }
+      sessionStorage.setItem("novamart_token", data.token);
+      dispatch({ type: "LOGIN", payload: data.user });
+      dispatch({
+        type: "ADD_TOAST",
+        payload: { type: "success", message: `Bem-vindo(a), ${data.user.name ?? "Utilizador"}! 👋` },
+      });
       setWebAuthnPending(false);
       setPendingToken(null);
     } catch (err) {
-      let msg = err.message || "Não foi possível concluir a verificação biométrica.";
+      let msg = err?.message || err?.data?.message || "Não foi possível concluir a verificação biométrica.";
       if (/not supported|secure context|insecure/i.test(msg)) {
         msg =
           "Biometria não está disponível nesta ligação. Use HTTPS no domínio público ou outro browser atualizado.";
@@ -1821,16 +1844,22 @@ function AuthPage() {
                         method: "POST",
                         body: { email: form.email.trim(), code: twoFactorCode.join("") },
                       }, dispatch);
-                      if (data.webAuthnPending && data.pendingToken) {
+                      const pending = parseWebAuthnPendingPayload(data);
+                      if (pending) {
                         setWebAuthnPending(true);
-                        setPendingToken(data.pendingToken);
-                        setWebAuthnMode(data.webAuthnMode === "authentication" ? "authentication" : "registration");
+                        setPendingToken(pending.pendingToken);
+                        setWebAuthnMode(pending.webAuthnMode);
                         setTwoFactor(false);
                         setWebAuthnError(null);
-                      } else if (data.token && data.user) {
+                      } else if (data?.token && data?.user?.id) {
                         sessionStorage.setItem("novamart_token", data.token);
                         dispatch({ type: "LOGIN", payload: data.user });
-                        dispatch({ type: "ADD_TOAST", payload: { type: "success", message: `Bem-vindo(a), ${data.user.name}! 👋` } });
+                        dispatch({
+                          type: "ADD_TOAST",
+                          payload: { type: "success", message: `Bem-vindo(a), ${data.user.name ?? "Utilizador"}! 👋` },
+                        });
+                      } else {
+                        setTwoFactorError("Resposta inesperada após o código. Atualize a API (git pull + PM2) e o site (npm run build).");
                       }
                     } catch (err) {
                       setTwoFactorError(err.message || "Erro ao verificar código");
