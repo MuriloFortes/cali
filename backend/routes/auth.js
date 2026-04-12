@@ -53,8 +53,17 @@ router.post("/login", async (req, res) => {
     "INSERT INTO sms_codes (user_id, phone, code, expires_at, verified, attempts) VALUES (?, ?, ?, ?, 0, 0)"
   ).run(user.id, user.email, code, expiresAt);
 
+  const logOnly =
+    process.env.EMAIL_2FA_LOG_ONLY === "1" || process.env.EMAIL_2FA_LOG_ONLY === "true";
+
   try {
-    await sendEmailCode(user.email, code);
+    if (logOnly) {
+      console.warn(
+        `[2FA] código para ${user.email}: ${code} (EMAIL_2FA_LOG_ONLY — só para testes; configure SMTP em produção)`
+      );
+    } else {
+      await sendEmailCode(user.email, code);
+    }
   } catch (err) {
     console.error("Erro ao enviar código 2FA:", err);
     return res.status(500).json({ error: true, message: "Não foi possível enviar o código de verificação" });

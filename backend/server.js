@@ -22,8 +22,34 @@ const PORT = process.env.PORT || 3002;
 // Atrás do Nginx / proxy: IP real em logs e cabeçalhos X-Forwarded-*
 app.set("trust proxy", 1);
 
-const corsOrigin = process.env.CORS_ORIGIN || "http://localhost:5173";
-app.use(cors({ origin: corsOrigin === "*" ? true : corsOrigin.split(",").map((s) => s.trim()) }));
+const corsOriginRaw = process.env.CORS_ORIGIN || "http://localhost:5173";
+
+/** Aceita "http://host", "https://host" ou só "host" / IP (o browser envia Origin com esquema). */
+function parseCorsOrigins(raw) {
+  const out = new Set();
+  for (const part of String(raw).split(",")) {
+    const s = part.trim();
+    if (!s) continue;
+    if (/^https?:\/\//i.test(s)) {
+      out.add(s.replace(/\/+$/, ""));
+    } else {
+      const h = s.replace(/\/+$/, "");
+      out.add(`http://${h}`);
+      out.add(`https://${h}`);
+    }
+  }
+  return [...out];
+}
+
+const corsAllowed =
+  corsOriginRaw.trim() === "*"
+    ? true
+    : (() => {
+        const list = parseCorsOrigins(corsOriginRaw);
+        return list.length ? list : ["http://localhost:5173"];
+      })();
+
+app.use(cors({ origin: corsAllowed }));
 app.use(express.json());
 
 // Servir arquivos estáticos de uploads (produtos e avatares)
