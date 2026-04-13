@@ -16,19 +16,39 @@ import { setChallenge, takeChallenge } from "../services/webauthnChallenges.js";
 
 const router = Router();
 
+function isLikelyIPv4(host) {
+  return /^\d{1,3}(\.\d{1,3}){3}$/.test(String(host || "").trim());
+}
+
 /**
- * RP ID tem de coincidir com o hostname onde o utilizador abre o site (sem porta, minúsculas).
- * Se WEBAUTHN_RP_ID não estiver definido, usa Host / X-Forwarded-Host — evita ficar preso em "localhost" em produção.
+ * RP ID = hostname público (ex.: calicream.club), **nunca** o IP quando a página abre por domínio.
+ * IPv4 como RP ID só é válido em cenários muito limitados; o browser rejeita se Origin for https://domínio.
  */
 function getRpId(req) {
   const fromEnv = process.env.WEBAUTHN_RP_ID;
   if (fromEnv != null && String(fromEnv).trim() !== "") {
-    return String(fromEnv).trim().split(":")[0].toLowerCase();
+    const v = String(fromEnv).trim().split(":")[0].toLowerCase();
+    if (!isLikelyIPv4(v)) return v;
   }
-  if (!req) return "localhost";
-  const raw = (req.get("x-forwarded-host") || req.get("host") || "").split(",")[0].trim();
-  const host = raw.split(":")[0].toLowerCase();
-  return host || "localhost";
+  if (req) {
+    const origin = getRequestOrigin(req);
+    if (origin) {
+      try {
+        const h = new URL(origin).hostname;
+        if (h && !isLikelyIPv4(h)) return h.toLowerCase();
+      } catch {
+        /* ignore */
+      }
+    }
+    const raw = (req.get("x-forwarded-host") || req.get("host") || "").split(",")[0].trim();
+    const host = raw.split(":")[0].toLowerCase();
+    if (host && !isLikelyIPv4(host)) return host;
+  }
+  const fallback = fromEnv != null && String(fromEnv).trim() !== ""
+    ? String(fromEnv).trim().split(":")[0].toLowerCase()
+    : "";
+  if (fallback) return fallback;
+  return "localhost";
 }
 
 function getRpName() {
