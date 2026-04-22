@@ -39,11 +39,21 @@ async function api(endpoint, options = {}, dispatch = null) {
     config.body = isFormData ? rest.body : (typeof rest.body === "object" ? JSON.stringify(rest.body) : rest.body);
   }
   const res = await fetch(`${API}${endpoint}`, config);
-  let data;
-  try {
-    data = await res.json();
-  } catch {
-    data = { message: "Resposta inválida do servidor" };
+  const rawText = await res.text();
+  let data = {};
+  const trimmed = rawText.trim();
+  if (trimmed) {
+    try {
+      data = JSON.parse(trimmed);
+    } catch {
+      const isHtml = trimmed.startsWith("<") || trimmed.includes("<!DOCTYPE");
+      data = {
+        message: isHtml
+          ? `O servidor devolveu HTML em vez de JSON (${res.status}). Confirme o deploy da API, o proxy /api e se a rota existe.`
+          : "Resposta inválida do servidor",
+        rawPreview: trimmed.slice(0, 180),
+      };
+    }
   }
   if (!res.ok) {
     if (res.status === 401 || (res.status === 403 && data?.code !== "PENDING_APPROVAL")) {
@@ -6352,7 +6362,7 @@ function AdminCoupons() {
                 try {
                   const raw = String(shippingFixedBRL ?? "15").replace(",", ".").trim();
                   await api(
-                    "/settings/site/shipping-fixed",
+                    "/settings/shipping-fixed",
                     { method: "PUT", body: { shippingFixedBRL: raw } },
                     dispatch
                   );

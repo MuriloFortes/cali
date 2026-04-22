@@ -223,9 +223,8 @@ router.get("/site/public", (req, res) => {
   });
 });
 
-// PUT /api/settings/site/shipping-fixed
-// JSON (sem multipart): evita Multer não preencher req.body só com campos de texto.
-router.put("/site/shipping-fixed", authenticate, requireAdmin, (req, res) => {
+// PUT …/shipping-fixed — JSON (sem Multer). Duas rotas por compatibilidade com proxy/deploy.
+function putShippingFixedHandler(req, res) {
   const raw = req.body?.shippingFixedBRL ?? req.body?.shipping_fixed;
   if (raw === undefined || raw === null || String(raw).trim() === "") {
     return res.status(400).json({ error: true, message: "Valor de frete obrigatório" });
@@ -242,7 +241,10 @@ router.put("/site/shipping-fixed", authenticate, requireAdmin, (req, res) => {
   `);
   upsert.run("site_shipping_fixed", str);
   res.json({ success: true, shippingFixedBRL: getShippingFixedBRL() });
-});
+}
+
+router.put("/site/shipping-fixed", authenticate, requireAdmin, putShippingFixedHandler);
+router.put("/shipping-fixed", authenticate, requireAdmin, putShippingFixedHandler);
 
 // PUT /api/settings/site
 // Admin atualiza texto, cores e banner/ícones do site

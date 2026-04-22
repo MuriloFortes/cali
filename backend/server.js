@@ -111,6 +111,13 @@ app.use("/api/categories", categoriesRoutes);
 app.use("/api/coupons", couponsRoutes);
 app.get("/api/inventory", authenticate, requireAdmin, getInventory);
 
+// 404 em JSON (evita resposta HTML do Express, que quebra o cliente com "Resposta inválida")
+app.use((req, res, next) => {
+  if (res.headersSent) return next();
+  if (!String(req.originalUrl || "").startsWith("/api")) return next();
+  res.status(404).json({ error: true, message: "Rota não encontrada", path: req.originalUrl });
+});
+
 app.use((err, req, res, next) => {
   console.error(err);
   res.status(err.status || 500).json({ error: true, message: err.message || "Erro interno do servidor" });
