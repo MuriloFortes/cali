@@ -6,7 +6,8 @@
     "start": "node server.js",
     "dev": "node --watch server.js",
     "seed": "node -e \"import('./database.js').then(m => m.resetDatabase())\"",
-    "db:encrypt": "node scripts/encrypt-db.mjs"
+    "db:encrypt": "node scripts/encrypt-db.mjs",
+    "db:sync-categories": "node scripts/sync-categories.mjs"
   },
   "dependencies": {
     "@simplewebauthn/server": "^13.0.0",

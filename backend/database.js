@@ -360,11 +360,62 @@ function runSeed() {
   }
 }
 
-function seedProductCategories() {
-  const n = db.prepare("SELECT COUNT(*) as n FROM product_categories").get();
-  if (n.n > 0) return;
+/** Emoji sugerido por nome (normalizado sem acentos para bancos legados). */
+function defaultEmojiForCategoryName(name) {
+  const k = String(name || "")
+    .trim()
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "");
+  const map = {
+    eletronicos: "🔌",
+    roupas: "👕",
+    casa: "🏠",
+    esportes: "⚽",
+  };
+  return map[k] || "📦";
+}
+
+/**
+ * Cria linhas em product_categories para cada nome distinto em products.category
+ * que ainda não existir (case-insensitive). Corrige VPS / merges com tabela vazia.
+ */
+export function syncProductCategoriesFromProducts() {
+  const distinct = db
+    .prepare(
+      `SELECT DISTINCT TRIM(category) AS name FROM products WHERE TRIM(IFNULL(category, '')) != ''`
+    )
+    .all();
+  const existing = new Set(
+    db.prepare(`SELECT LOWER(name) AS l FROM product_categories`).all().map((r) => r.l)
+  );
+  let nextOrder =
+    (db.prepare(`SELECT COALESCE(MAX(sort_order), 0) AS m FROM product_categories`).get().m ?? 0) || 0;
   const ins = db.prepare(`
     INSERT INTO product_categories (id, name, emoji, sort_order, active)
+    VALUES (?, ?, ?, ?, 1)
+  `);
+  for (const row of distinct) {
+    const name = String(row.name || "").trim();
+    if (!name) continue;
+    const key = name.toLowerCase();
+    if (existing.has(key)) continue;
+    nextOrder += 1;
+    const id = `cat-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+    const emoji = defaultEmojiForCategoryName(name);
+    try {
+      ins.run(id, name, emoji, nextOrder);
+      existing.add(key);
+    } catch (e) {
+      const msg = String(e?.message || "");
+      if (!msg.includes("UNIQUE") && !msg.includes("unique")) throw e;
+    }
+  }
+}
+
+function seedProductCategories() {
+  const ins = db.prepare(`
+    INSERT OR IGNORE INTO product_categories (id, name, emoji, sort_order, active)
     VALUES (?, ?, ?, ?, 1)
   `);
   const rows = [
@@ -374,6 +425,7 @@ function seedProductCategories() {
     ["cat-esp", "Esportes", "⚽", 4],
   ];
   for (const r of rows) ins.run(...r);
+  syncProductCategoriesFromProducts();
 }
 
 export function initDatabase() {
