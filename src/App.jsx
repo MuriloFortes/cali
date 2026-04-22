@@ -404,8 +404,15 @@ function appReducer(state, action) {
       return { ...state, adminPixLoaded: action.payload };
     case "SET_STORE_ICON":
       return { ...state, storeIcon: action.payload || "Store", storeIconLoaded: true };
-    case "SET_SITE_CONFIG":
-      return { ...state, siteConfig: action.payload || null, siteConfigLoaded: true };
+    case "SET_SITE_CONFIG": {
+      const p = action.payload;
+      if (p == null) return { ...state, siteConfig: null, siteConfigLoaded: true };
+      return {
+        ...state,
+        siteConfig: { ...(state.siteConfig || {}), ...p },
+        siteConfigLoaded: true,
+      };
+    }
     case "UPDATE_ADMIN_PRODUCT": {
       const p = action.payload;
       const upd = (list) => list.map(x => x.id === p.id ? { ...x, ...p } : x);
@@ -6343,9 +6350,12 @@ function AdminCoupons() {
               onClick={async () => {
                 setShippingSaving(true);
                 try {
-                  const fd = new FormData();
-                  fd.append("shippingFixedBRL", String(shippingFixedBRL ?? "15").replace(",", "."));
-                  await api("/settings/site", { method: "PUT", body: fd }, dispatch);
+                  const raw = String(shippingFixedBRL ?? "15").replace(",", ".").trim();
+                  await api(
+                    "/settings/site/shipping-fixed",
+                    { method: "PUT", body: { shippingFixedBRL: raw } },
+                    dispatch
+                  );
                   const fresh = await api("/settings/site", {}, dispatch);
                   dispatch({ type: "SET_SITE_CONFIG", payload: fresh || {} });
                   setShippingFixedBRL(String(fresh?.shippingFixedBRL ?? 15));

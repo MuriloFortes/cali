@@ -223,6 +223,27 @@ router.get("/site/public", (req, res) => {
   });
 });
 
+// PUT /api/settings/site/shipping-fixed
+// JSON (sem multipart): evita Multer não preencher req.body só com campos de texto.
+router.put("/site/shipping-fixed", authenticate, requireAdmin, (req, res) => {
+  const raw = req.body?.shippingFixedBRL ?? req.body?.shipping_fixed;
+  if (raw === undefined || raw === null || String(raw).trim() === "") {
+    return res.status(400).json({ error: true, message: "Valor de frete obrigatório" });
+  }
+  const n = parseFloat(String(raw).replace(",", "."));
+  if (!Number.isFinite(n) || n < 0 || n > 999999.99) {
+    return res.status(400).json({ error: true, message: "Valor de frete fixo inválido" });
+  }
+  const str = String(Math.round(n * 100) / 100);
+  const upsert = db.prepare(`
+    INSERT INTO store_settings (key, value, updated_at)
+    VALUES (?, ?, datetime('now'))
+    ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at
+  `);
+  upsert.run("site_shipping_fixed", str);
+  res.json({ success: true, shippingFixedBRL: getShippingFixedBRL() });
+});
+
 // PUT /api/settings/site
 // Admin atualiza texto, cores e banner/ícones do site
 router.put("/site", authenticate, requireAdmin, uploadSiteAssets, (req, res) => {
