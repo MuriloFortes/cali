@@ -1,6 +1,7 @@
 import { Router } from "express";
 import bcrypt from "bcryptjs";
 import { db } from "../database.js";
+import { authenticate } from "../middleware/auth.js";
 import { generateCode, codeExpiresAt } from "../services/sms.js";
 import { sendEmailCode } from "../services/email.js";
 import {
@@ -21,10 +22,18 @@ function hasWebAuthnCredential(userId) {
 router.post("/login", async (req, res) => {
   const { email, password } = req.body ?? {};
   const user = db.prepare(
-    "SELECT id, name, email, phone, password_hash, role, active FROM users WHERE email = ?"
+    "SELECT id, name, email, phone, password_hash, role, active, approved FROM users WHERE email = ?"
   ).get(email);
   if (!user) {
     return res.status(401).json({ error: true, message: "E-mail ou senha incorretos" });
+  }
+  const approved = user.approved !== 0 && user.approved != null;
+  if (!approved) {
+    return res.status(403).json({
+      error: true,
+      message: "Seu cadastro aguarda aprovação do administrador. Você receberá acesso após a liberação.",
+      code: "PENDING_APPROVAL",
+    });
   }
   if (user.active !== 1) {
     return res.status(403).json({ error: true, message: "Conta desativada. Entre em contato com o suporte." });
@@ -114,21 +123,12 @@ router.post("/register", (req, res) => {
   const id = "u" + Date.now();
   const hash = bcrypt.hashSync(password, 10);
   db.prepare(
-    "INSERT INTO users (id, name, email, phone, password_hash, role) VALUES (?, ?, ?, ?, ?, 'customer')"
+    "INSERT INTO users (id, name, email, phone, password_hash, role, active, approved) VALUES (?, ?, ?, ?, ?, 'customer', 0, 0)"
   ).run(id, name.trim(), email.trim(), (phone || "").trim(), hash);
-  const user = db.prepare(
-    "SELECT id, name, email, phone, role, active FROM users WHERE id = ?"
-  ).get(id);
-
-  if (isWebAuthnDisabled()) {
-    const sid = rotateSessionToken(user.id);
-    return res.status(201).json({ user: userToResponse(user), token: generateAccessToken(user.id, sid) });
-  }
 
   return res.status(201).json({
-    webAuthnPending: true,
-    pendingToken: generatePendingToken(user.id),
-    webAuthnMode: "registration",
+    pendingApproval: true,
+    message: "Cadastro recebido. Aguarde a aprovação de um administrador para acessar a loja.",
   });
 });
 
@@ -138,10 +138,14 @@ router.post("/verify-2fa", (req, res) => {
     return res.status(400).json({ error: true, message: "E-mail e código são obrigatórios" });
   }
   const user = db.prepare(
-    "SELECT id, name, email, phone, password_hash, role, active FROM users WHERE email = ?"
+    "SELECT id, name, email, phone, password_hash, role, active, approved FROM users WHERE email = ?"
   ).get(email);
   if (!user) {
     return res.status(400).json({ error: true, message: "Sessão de verificação inválida" });
+  }
+  const approved = user.approved !== 0 && user.approved != null;
+  if (!approved) {
+    return res.status(403).json({ error: true, message: "Cadastro aguardando aprovação do administrador." });
   }
   if (user.active !== 1) {
     return res.status(403).json({ error: true, message: "Conta desativada. Entre em contato com o suporte." });
@@ -191,6 +195,28 @@ router.post("/verify-2fa", (req, res) => {
     pendingToken: generatePendingToken(user.id),
     webAuthnMode: hasWebAuthnCredential(user.id) ? "authentication" : "registration",
   });
+});
+
+/** Apaga conversas e mensagens do cliente (chat não permanece após sair). */
+router.post("/logout", authenticate, (req, res) => {
+  const uid = req.user.id;
+  const isAdmin = req.user.role === "admin";
+
+  db.transaction(() => {
+    if (isAdmin) {
+      db.prepare("DELETE FROM messages").run();
+      db.prepare("DELETE FROM conversations").run();
+    } else {
+      const convs = db.prepare("SELECT id FROM conversations WHERE customer_id = ?").all(uid);
+      const delMsg = db.prepare("DELETE FROM messages WHERE conversation_id = ?");
+      for (const c of convs) {
+        delMsg.run(c.id);
+      }
+      db.prepare("DELETE FROM conversations WHERE customer_id = ?").run(uid);
+    }
+  })();
+
+  res.status(200).json({ ok: true });
 });
 
 export default router;

@@ -19,6 +19,13 @@ function maybeMulter(req, res, next) {
 }
 
 const CATEGORY_EMOJI = { Eletrônicos: "🔌", Roupas: "👕", Casa: "🏠", Esportes: "⚽" };
+
+function validateActiveCategory(categoryName) {
+  const row = db
+    .prepare("SELECT emoji FROM product_categories WHERE name = ? COLLATE NOCASE AND active = 1")
+    .get(categoryName);
+  return row || null;
+}
 const GRADIENTS = [
   "from-violet-500 to-indigo-600",
   "from-cyan-500 to-blue-600",
@@ -121,12 +128,16 @@ router.post("/", authenticate, requireAdmin, maybeMulter, (req, res) => {
   if (!category) {
     return res.status(400).json({ error: true, message: "Categoria é obrigatória" });
   }
+  const catRow = validateActiveCategory(category);
+  if (!catRow) {
+    return res.status(400).json({ error: true, message: "Categoria inválida ou inativa. Cadastre-a em Admin > Categorias." });
+  }
   if (Number.isNaN(stock) || stock < 0) {
     return res.status(400).json({ error: true, message: "Estoque é obrigatório e deve ser >= 0" });
   }
 
   const id = "p" + Date.now();
-  let img = req.file ? `/uploads/products/${req.file.filename}` : (body.image || CATEGORY_EMOJI[category] || "📦");
+  let img = req.file ? `/uploads/products/${req.file.filename}` : (body.image || catRow.emoji || CATEGORY_EMOJI[category] || "📦");
   const grad = gradient || GRADIENTS[Math.floor(Math.random() * GRADIENTS.length)];
 
   db.prepare(`
@@ -174,6 +185,9 @@ router.put("/:id", authenticate, requireAdmin, maybeMulter, (req, res) => {
   }
   if (Number.isNaN(stock) || stock < 0) {
     return res.status(400).json({ error: true, message: "Estoque deve ser >= 0" });
+  }
+  if (!validateActiveCategory(category)) {
+    return res.status(400).json({ error: true, message: "Categoria inválida ou inativa." });
   }
   db.prepare(`
     UPDATE products SET name=?, description=?, price=?, original_price=?, image=?, gradient=?, category=?, stock=?, active=?, updated_at=datetime('now')

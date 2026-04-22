@@ -17,13 +17,21 @@ export function authenticate(req, res, next) {
       return res.status(401).json({ error: true, message: "Faça login novamente (sessão antiga)" });
     }
     const user = db.prepare(
-      "SELECT id, name, email, phone, role, active, created_at, updated_at, session_token FROM users WHERE id = ?"
+      "SELECT id, name, email, phone, role, active, approved, created_at, updated_at, session_token FROM users WHERE id = ?"
     ).get(payload.userId);
     if (!user) {
       return res.status(401).json({ error: true, message: "Token inválido ou expirado" });
     }
+    const approved = user.approved !== 0 && user.approved != null;
+    if (!approved) {
+      return res.status(403).json({
+        error: true,
+        message: "Cadastro aguardando aprovação do administrador.",
+        code: "PENDING_APPROVAL",
+      });
+    }
     if (user.active !== 1) {
-      return res.status(403).json({ error: true, message: "Conta desativada" });
+      return res.status(403).json({ error: true, message: "Conta desativada. Entre em contato com o suporte." });
     }
     if (user.session_token !== payload.sid) {
       return res.status(401).json({

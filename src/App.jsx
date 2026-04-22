@@ -8,7 +8,7 @@ import {
   ChevronUp, CheckCircle, AlertTriangle, XCircle, Info, Trash2,
   MapPin, Home, Hash, Building, Map, CreditCard, FileText, Copy, Zap,
   Phone, BarChart3, Users, Plus, Pencil, ToggleLeft, ToggleRight, RefreshCw, Warehouse, ImagePlus, Upload,
-  MessageCircle, MessageSquare,
+  MessageCircle, MessageSquare, Ticket, FolderTree,
 } from "lucide-react";
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -46,13 +46,30 @@ async function api(endpoint, options = {}, dispatch = null) {
     data = { message: "Resposta inválida do servidor" };
   }
   if (!res.ok) {
-    if (res.status === 401 || res.status === 403) {
+    if (res.status === 401 || (res.status === 403 && data?.code !== "PENDING_APPROVAL")) {
       sessionStorage.removeItem("novamart_token");
       if (dispatch) dispatch({ type: "LOGOUT" });
     }
     throw { status: res.status, message: data.message || "Erro desconhecido", data };
   }
   return data;
+}
+
+/** Encerra sessão no servidor (apaga chat do cliente) e limpa o estado local. */
+async function performLogout(dispatch) {
+  const token = sessionStorage.getItem("novamart_token");
+  if (token) {
+    try {
+      await fetch(`${API}/auth/logout`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}` },
+      });
+    } catch {
+      /* ignore */
+    }
+  }
+  sessionStorage.removeItem("novamart_token");
+  dispatch({ type: "LOGOUT" });
 }
 
 /** Resposta pós-login ou pós-2FA com passkey pendente (tolerância a `pending_token`). */
@@ -77,11 +94,13 @@ function formatPhone(value) {
 // CONSTANTS
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-const CATEGORIES = ["Eletrônicos", "Roupas", "Casa", "Esportes"];
+const FALLBACK_CATEGORIES = ["Eletrônicos", "Roupas", "Casa", "Esportes"];
 
-function getDefaultEmoji(category) {
+function getDefaultEmoji(categoryName, categoriesList = []) {
+  const row = categoriesList.find((c) => c.name === categoryName);
+  if (row?.emoji) return row.emoji;
   const map = { Eletrônicos: "🔌", Roupas: "👕", Casa: "🏠", Esportes: "⚽" };
-  return map[category] || "📦";
+  return map[categoryName] || "📦";
 }
 
 const BR_STATES = ["AC", "AL", "AP", "AM", "BA", "CE", "DF", "ES", "GO", "MA", "MT", "MS", "MG", "PA", "PB", "PR", "PE", "PI", "RJ", "RN", "RS", "RO", "RR", "SC", "SP", "SE", "TO"];
@@ -152,6 +171,7 @@ const initialState = {
   storeIconLoaded: false,
   siteConfig: null,
   siteConfigLoaded: false,
+  productCategories: [],
 };
 
 function appReducer(state, action) {
@@ -159,7 +179,24 @@ function appReducer(state, action) {
     case "LOGIN":
       return { ...state, currentUser: action.payload, currentPage: "home", cart: [], apiError: null };
     case "LOGOUT":
-      return { ...state, currentUser: null, currentPage: "auth", cart: [], searchQuery: "", orderSuccess: null, checkoutStep: 1, checkoutData: defaultCheckoutData, apiError: null };
+      return {
+        ...state,
+        currentUser: null,
+        currentPage: "auth",
+        cart: [],
+        searchQuery: "",
+        orderSuccess: null,
+        checkoutStep: 1,
+        checkoutData: defaultCheckoutData,
+        apiError: null,
+        chatConversations: [],
+        chatMessages: [],
+        chatOpen: false,
+        activeChatId: null,
+        chatUnreadCount: 0,
+        newChatSubject: "",
+        newChatMessage: "",
+      };
     case "NAVIGATE":
       return { ...state, currentPage: action.payload };
     case "SET_SEARCH":
@@ -288,6 +325,8 @@ function appReducer(state, action) {
       };
     case "SET_PRODUCTS":
       return { ...state, products: (action.payload || []).map(p => ({ ...p, tags: p.tags || [] })) };
+    case "SET_PRODUCT_CATEGORIES":
+      return { ...state, productCategories: action.payload || [] };
     case "SET_ORDERS":
       return { ...state, orders: (action.payload || []).map(o => ({
         id: o.id,
@@ -429,11 +468,11 @@ function useIdleLogout(active, dispatch) {
     const reset = () => {
       clearTimeout(timeoutId);
       timeoutId = setTimeout(() => {
-        sessionStorage.removeItem("novamart_token");
-        dispatchRef.current({ type: "LOGOUT" });
-        dispatchRef.current({
-          type: "ADD_TOAST",
-          payload: { type: "warning", message: "Sessão encerrada por inatividade (2 minutos)." },
+        void performLogout(dispatchRef.current).then(() => {
+          dispatchRef.current({
+            type: "ADD_TOAST",
+            payload: { type: "warning", message: "Sessão encerrada por inatividade (2 minutos)." },
+          });
         });
       }, IDLE_LOGOUT_MS);
     };
@@ -603,6 +642,31 @@ function getButtonSecondaryStyle(siteConfig) {
   return { backgroundColor: color };
 }
 
+function getBorderRadiusStyle(siteConfig) {
+  return siteConfig?.borderRadius || "0.75rem";
+}
+
+function getFontFamilyStyle(siteConfig) {
+  const font = siteConfig?.fontFamily || "Plus Jakarta Sans";
+  const validFonts = ["Plus Jakarta Sans", "Inter", "Outfit", "Poppins", "Roboto", "Montserrat", "Quicksand"];
+  if (!validFonts.includes(font)) return "Plus Jakarta Sans";
+  return font;
+}
+
+function getAnimationClasses(siteConfig) {
+  if (siteConfig?.enableAnimations === false) {
+    return { animation: "none", transition: "none" };
+  }
+  return {};
+}
+
+function getHoverClasses(siteConfig) {
+  if (siteConfig?.enableHoverEffects === false) {
+    return "";
+  }
+  return "hover-lift hover-glow card-hover";
+}
+
 function getSiteBackgroundStyle(siteConfig) {
   const top = siteConfig?.backgroundTopColor || "#0a0a14";
   const bottom = siteConfig?.backgroundBottomColor || "#0f0f1a";
@@ -650,15 +714,23 @@ function getNextOrderId(orders) {
   return `ORD-${next}`;
 }
 
-function checkoutTotals(cart, products) {
+/** Frete fixo configurável pelo admin (store_settings → API site). */
+function getFixedShippingBRL(siteConfig) {
+  const n = parseFloat(siteConfig?.shippingFixedBRL);
+  if (Number.isFinite(n) && n >= 0) return n;
+  return 15;
+}
+
+function checkoutTotals(cart, products, couponDiscount = 0, shippingFixed = 15) {
   const cartItems = cart
     .map(i => ({ ...i, product: products.find(p => p.id === i.productId) }))
     .filter(i => i.product);
   const subtotal = cartItems.reduce((s, i) => s + i.product.price * i.quantity, 0);
-  // Frete fixo (sem frete grátis por faixa)
-  const shipping = 15;
-  const total = subtotal + shipping;
-  return { cartItems, subtotal, shipping, total };
+  const ship = parseFloat(shippingFixed);
+  const shipping = Number.isFinite(ship) && ship >= 0 ? ship : 15;
+  const disc = Math.min(Math.max(0, Number(couponDiscount) || 0), subtotal);
+  const total = subtotal - disc + shipping;
+  return { cartItems, subtotal, shipping, total, discountAmount: disc };
 }
 
 function maskCEP(v) {
@@ -671,6 +743,7 @@ function maskCEP(v) {
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 function ProductImage({ product, size = "md", className = "" }) {
+  const { state } = useApp();
   const [loaded, setLoaded] = useState(false);
   const [error, setError] = useState(false);
   const isRealImage = product?.image && String(product.image).startsWith("/");
@@ -681,7 +754,7 @@ function ProductImage({ product, size = "md", className = "" }) {
   if (!isRealImage || error) {
     return (
       <div className={`${sizeClass} bg-gradient-to-br ${product.gradient || "from-violet-500 to-indigo-600"} flex items-center justify-center rounded-xl overflow-hidden flex-shrink-0 ${className}`}>
-        <span>{product.image || getDefaultEmoji(product.category)}</span>
+        <span>{product.image || getDefaultEmoji(product.category, state.productCategories)}</span>
       </div>
     );
   }
@@ -863,7 +936,7 @@ function CartDrawer() {
   }).filter(i => i.product);
 
   const subtotal = cartItems.reduce((sum, i) => sum + (i.product?.price ?? 0) * i.quantity, 0);
-  const shipping = 15;
+  const shipping = getFixedShippingBRL(state.siteConfig);
   const total = subtotal + shipping;
 
   useEffect(() => {
@@ -962,7 +1035,7 @@ function CartDrawer() {
 // CHECKOUT PAGE
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-function CheckoutSidebar({ cartItems, subtotal, shipping, total, collapsed, onToggle }) {
+function CheckoutSidebar({ cartItems, subtotal, shipping, discountAmount, total, collapsed, onToggle }) {
   const itemCount = cartItems.reduce((s, i) => s + i.quantity, 0);
   return (
     <div className="lg:sticky lg:top-24 self-start w-full lg:w-[340px] rounded-2xl border border-white/[0.08] overflow-hidden" style={{ background: "rgba(255,255,255,0.03)" }}>
@@ -987,6 +1060,9 @@ function CheckoutSidebar({ cartItems, subtotal, shipping, total, collapsed, onTo
           </ul>
           <div className="border-t border-white/10 pt-3 space-y-1.5 text-sm">
             <div className="flex justify-between text-zinc-400"><span>Subtotal</span><span>{formatBRL(subtotal)}</span></div>
+            {discountAmount > 0 && (
+              <div className="flex justify-between text-emerald-400/90"><span>Cupom</span><span>− {formatBRL(discountAmount)}</span></div>
+            )}
             <div className="flex justify-between text-zinc-400"><span>Frete</span><span className={shipping === 0 ? "text-emerald-400" : ""}>{shipping === 0 ? "Grátis" : formatBRL(shipping)}</span></div>
             <div className="flex justify-between text-white font-bold text-lg pt-2"><span>Total</span><span>{formatBRL(total)}</span></div>
           </div>
@@ -1002,10 +1078,16 @@ function CheckoutPage() {
   const [cepLoading, setCepLoading] = useState(false);
   const [confirmLoading, setConfirmLoading] = useState(false);
   const [summaryCollapsed, setSummaryCollapsed] = useState(false);
+  const [couponInput, setCouponInput] = useState("");
+  const [appliedCoupon, setAppliedCoupon] = useState(null);
+  const [couponError, setCouponError] = useState("");
+  const [couponLoading, setCouponLoading] = useState(false);
   const formRef = useRef(null);
 
   const cartItems = state.cart.map(i => ({ ...i, product: state.products.find(p => p.id === i.productId) })).filter(i => i.product);
-  const { subtotal, shipping, total } = checkoutTotals(state.cart, state.products);
+  const couponDisc = appliedCoupon?.discountAmount ?? 0;
+  const shippingFixed = getFixedShippingBRL(state.siteConfig);
+  const { subtotal, shipping, total, discountAmount } = checkoutTotals(state.cart, state.products, couponDisc, shippingFixed);
 
   const didMountRedirect = useRef(false);
 
@@ -1137,8 +1219,7 @@ function CheckoutPage() {
       items: cartItems.map(({ productId, quantity }) => ({ productId, quantity })),
       paymentMethod: "pix",
       address,
-      discount: 0,
-      shipping,
+      ...(appliedCoupon?.code ? { couponCode: appliedCoupon.code } : {}),
     };
     try {
       const data = await api("/orders", { method: "POST", body }, dispatch);
@@ -1277,6 +1358,58 @@ function CheckoutPage() {
 
             {state.checkoutStep === 2 && (
               <div className="space-y-4">
+                <div className="rounded-2xl border border-white/[0.08] p-4" style={{ background: "rgba(255,255,255,0.03)" }}>
+                  <p className="text-xs text-zinc-500 uppercase mb-2">Cupom de desconto</p>
+                  <div className="flex flex-col sm:flex-row gap-2">
+                    <input
+                      value={couponInput}
+                      onChange={e => { setCouponInput(e.target.value.toUpperCase()); setCouponError(""); }}
+                      placeholder="CÓDIGO"
+                      className="flex-1 px-3 py-2.5 rounded-xl bg-white/5 border border-white/10 text-white text-sm uppercase tracking-wide"
+                      disabled={!!appliedCoupon}
+                    />
+                    {!appliedCoupon ? (
+                      <button
+                        type="button"
+                        disabled={couponLoading || !couponInput.trim()}
+                        onClick={async () => {
+                          setCouponLoading(true);
+                          setCouponError("");
+                          try {
+                            const data = await api("/coupons/validate", {
+                              method: "POST",
+                              body: { code: couponInput.trim(), subtotal },
+                            }, dispatch);
+                            setAppliedCoupon({ code: data.code, percent: data.percent, discountAmount: data.discountAmount });
+                            dispatch({ type: "ADD_TOAST", payload: { type: "success", message: `Cupom aplicado: ${data.percent}% de desconto` } });
+                          } catch (err) {
+                            setCouponError(err.message || "Cupom inválido");
+                          } finally {
+                            setCouponLoading(false);
+                          }
+                        }}
+                        className="px-4 py-2.5 rounded-xl border border-violet-500/40 text-violet-300 text-sm font-medium hover:bg-violet-500/10 disabled:opacity-40"
+                      >
+                        {couponLoading ? "…" : "Aplicar"}
+                      </button>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => { setAppliedCoupon(null); setCouponInput(""); setCouponError(""); }}
+                        className="px-4 py-2.5 rounded-xl border border-white/10 text-zinc-400 text-sm"
+                      >
+                        Remover
+                      </button>
+                    )}
+                  </div>
+                  {couponError && <p className="text-rose-400 text-xs mt-2">{couponError}</p>}
+                  {appliedCoupon && (
+                    <p className="text-emerald-400/90 text-xs mt-2">
+                      Desconto de {appliedCoupon.percent}% (−{formatBRL(appliedCoupon.discountAmount)})
+                    </p>
+                  )}
+                </div>
+
                 <div className="rounded-xl border border-emerald-500/20 bg-emerald-500/5 p-4">
                   <div className="flex items-center gap-3 mb-2">
                     <div className="w-8 h-8 rounded-lg bg-emerald-500/20 flex items-center justify-center">
@@ -1284,7 +1417,7 @@ function CheckoutPage() {
                     </div>
                     <div>
                       <p className="text-white text-sm font-semibold">Pagamento via PIX</p>
-                      <p className="text-emerald-400 text-xs">Sem descontos. QR Code após confirmação.</p>
+                      <p className="text-emerald-400 text-xs">QR Code após confirmação.</p>
                     </div>
                   </div>
                   {state.pixConfig && state.pixConfig.configured === false && (
@@ -1312,6 +1445,9 @@ function CheckoutPage() {
                 <div className="rounded-2xl border border-white/[0.08] p-6" style={{ background: "rgba(255,255,255,0.03)" }}>
                   <div className="space-y-1.5 text-sm mb-4">
                     <div className="flex justify-between text-zinc-400"><span>Subtotal</span><span>{formatBRL(subtotal)}</span></div>
+                    {discountAmount > 0 && (
+                      <div className="flex justify-between text-emerald-400/90"><span>Cupom</span><span>− {formatBRL(discountAmount)}</span></div>
+                    )}
                     <div className="flex justify-between text-zinc-400"><span>Frete</span><span className={shipping === 0 ? "text-emerald-400" : ""}>{shipping === 0 ? "Grátis" : formatBRL(shipping)}</span></div>
                     <div className="flex justify-between text-white font-bold text-xl pt-2"><span>Total</span><span>{formatBRL(total)}</span></div>
                   </div>
@@ -1355,6 +1491,7 @@ function CheckoutPage() {
             cartItems={cartItems}
             subtotal={subtotal}
             shipping={shipping}
+            discountAmount={discountAmount}
             total={total}
             collapsed={summaryCollapsed}
             onToggle={() => setSummaryCollapsed(s => !s)}
@@ -1489,7 +1626,10 @@ function OrderSuccessPage() {
 
 function AuthPage() {
   const { state, dispatch } = useApp();
+  const [authTab, setAuthTab] = useState("login");
   const [form, setForm] = useState({ email: "", password: "" });
+  const [regForm, setRegForm] = useState({ name: "", email: "", phone: "", password: "", password2: "" });
+  const [regLoading, setRegLoading] = useState(false);
   const [errors, setErrors] = useState({});
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -1520,6 +1660,48 @@ function AuthPage() {
     if (!form.password) e.password = "Senha é obrigatória";
     setErrors(e);
     return !Object.keys(e).length;
+  };
+
+  const handleRegister = async () => {
+    const e = {};
+    if (!regForm.name.trim() || regForm.name.trim().length < 2) e.regName = "Nome é obrigatório (mín. 2 caracteres)";
+    if (!regForm.email.trim()) e.regEmail = "E-mail é obrigatório";
+    else if (!/\S+@\S+\.\S+/.test(regForm.email)) e.regEmail = "E-mail inválido";
+    const phoneDigits = String(regForm.phone || "").replace(/\D/g, "");
+    if (phoneDigits.length < 10) e.regPhone = "Telefone com mín. 10 dígitos";
+    if (!regForm.password || regForm.password.length < 6) e.regPassword = "Senha mín. 6 caracteres";
+    if (regForm.password !== regForm.password2) e.regPassword2 = "As senhas não conferem";
+    setErrors(e);
+    if (Object.keys(e).length) return;
+    setRegLoading(true);
+    try {
+      const data = await api(
+        "/auth/register",
+        {
+          method: "POST",
+          body: {
+            name: regForm.name.trim(),
+            email: regForm.email.trim(),
+            phone: regForm.phone,
+            password: regForm.password,
+          },
+        },
+        null
+      );
+      if (data?.pendingApproval) {
+        dispatch({
+          type: "ADD_TOAST",
+          payload: { type: "success", message: data.message || "Cadastro enviado. Aguarde a aprovação do administrador." },
+        });
+        setAuthTab("login");
+        setRegForm({ name: "", email: "", phone: "", password: "", password2: "" });
+        setForm(f => ({ ...f, email: regForm.email.trim() }));
+      }
+    } catch (err) {
+      dispatch({ type: "ADD_TOAST", payload: { type: "error", message: err.message || "Erro ao cadastrar" } });
+    } finally {
+      setRegLoading(false);
+    }
   };
 
   const handleLogin = async () => {
@@ -1662,10 +1844,19 @@ function AuthPage() {
           <div className="flex border-b border-white/10">
             <button
               type="button"
-              className="flex-1 flex items-center justify-center gap-2 py-4 text-sm font-semibold text-violet-400 border-b-2 border-violet-400 bg-violet-500/5"
+              onClick={() => { setAuthTab("login"); setErrors({}); }}
+              className={`flex-1 flex items-center justify-center gap-2 py-4 text-sm font-semibold transition-colors ${authTab === "login" ? "text-violet-400 border-b-2 border-violet-400 bg-violet-500/5" : "text-zinc-500 border-b-2 border-transparent hover:text-zinc-300"}`}
             >
               <LogIn size={16} />
               Entrar
+            </button>
+            <button
+              type="button"
+              onClick={() => { setAuthTab("register"); setErrors({}); }}
+              className={`flex-1 flex items-center justify-center gap-2 py-4 text-sm font-semibold transition-colors ${authTab === "register" ? "text-violet-400 border-b-2 border-violet-400 bg-violet-500/5" : "text-zinc-500 border-b-2 border-transparent hover:text-zinc-300"}`}
+            >
+              <UserPlus size={16} />
+              Cadastrar
             </button>
           </div>
 
@@ -1717,6 +1908,72 @@ function AuthPage() {
                     Voltar
                   </button>
                 </div>
+              </div>
+            ) : authTab === "register" && !twoFactor ? (
+              <div className="space-y-4">
+                <p className="text-xs text-zinc-500 text-center leading-relaxed">
+                  Após o cadastro, um administrador precisa aprovar sua conta antes do primeiro acesso.
+                </p>
+                <div>
+                  <label className="block text-xs font-medium text-zinc-400 mb-1.5 uppercase">Nome completo</label>
+                  <input
+                    value={regForm.name}
+                    onChange={e => setRegForm(f => ({ ...f, name: e.target.value }))}
+                    className="w-full px-4 py-3 rounded-xl bg-white/5 border border-white/10 text-white text-sm"
+                    placeholder="Seu nome"
+                  />
+                  {errors.regName && <p className="text-rose-400 text-xs mt-1">{errors.regName}</p>}
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-zinc-400 mb-1.5 uppercase">E-mail</label>
+                  <input
+                    type="email"
+                    value={regForm.email}
+                    onChange={e => setRegForm(f => ({ ...f, email: e.target.value }))}
+                    className="w-full px-4 py-3 rounded-xl bg-white/5 border border-white/10 text-white text-sm"
+                    placeholder="seu@email.com"
+                  />
+                  {errors.regEmail && <p className="text-rose-400 text-xs mt-1">{errors.regEmail}</p>}
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-zinc-400 mb-1.5 uppercase">Telefone</label>
+                  <input
+                    value={regForm.phone}
+                    onChange={e => setRegForm(f => ({ ...f, phone: formatPhone(e.target.value) }))}
+                    className="w-full px-4 py-3 rounded-xl bg-white/5 border border-white/10 text-white text-sm"
+                    placeholder="(11) 99999-9999"
+                  />
+                  {errors.regPhone && <p className="text-rose-400 text-xs mt-1">{errors.regPhone}</p>}
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-zinc-400 mb-1.5 uppercase">Senha</label>
+                  <input
+                    type="password"
+                    value={regForm.password}
+                    onChange={e => setRegForm(f => ({ ...f, password: e.target.value }))}
+                    className="w-full px-4 py-3 rounded-xl bg-white/5 border border-white/10 text-white text-sm"
+                  />
+                  {errors.regPassword && <p className="text-rose-400 text-xs mt-1">{errors.regPassword}</p>}
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-zinc-400 mb-1.5 uppercase">Confirmar senha</label>
+                  <input
+                    type="password"
+                    value={regForm.password2}
+                    onChange={e => setRegForm(f => ({ ...f, password2: e.target.value }))}
+                    className="w-full px-4 py-3 rounded-xl bg-white/5 border border-white/10 text-white text-sm"
+                  />
+                  {errors.regPassword2 && <p className="text-rose-400 text-xs mt-1">{errors.regPassword2}</p>}
+                </div>
+                <button
+                  type="button"
+                  disabled={regLoading}
+                  onClick={handleRegister}
+                  style={getButtonPrimaryGradientStyle(state.siteConfig)}
+                  className="w-full py-3 rounded-xl text-white font-semibold text-sm disabled:opacity-50"
+                >
+                  {regLoading ? "Enviando..." : "Criar cadastro"}
+                </button>
               </div>
             ) : (
             <>
@@ -2081,7 +2338,7 @@ function Header() {
                     </button>
                   )}
                   <div className="border-t border-white/10 mt-1">
-                    <button onClick={() => { sessionStorage.removeItem("novamart_token"); dispatch({ type: "LOGOUT" }); }} className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-rose-400 hover:bg-rose-500/10 transition-colors">
+                    <button type="button" onClick={() => void performLogout(dispatch)} className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-rose-400 hover:bg-rose-500/10 transition-colors">
                       <LogOut size={15} /> Sair
                     </button>
                   </div>
@@ -2128,7 +2385,7 @@ function Header() {
             {isAdmin && (
               <button onClick={() => nav("admin-dashboard")} className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm text-violet-400 hover:bg-violet-500/10"><Shield size={16} /> Painel Admin</button>
             )}
-            <button onClick={() => { sessionStorage.removeItem("novamart_token"); dispatch({ type: "LOGOUT" }); }} className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm text-rose-400 hover:bg-rose-500/10"><LogOut size={16} /> Sair</button>
+            <button type="button" onClick={() => void performLogout(dispatch)} className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm text-rose-400 hover:bg-rose-500/10"><LogOut size={16} /> Sair</button>
           </div>
         )}
       </div>
@@ -2213,9 +2470,13 @@ function HomePage() {
   useEffect(() => {
     let cancelled = false;
     dispatch({ type: "SET_LOADING", payload: true });
-    api("/products", {}, dispatch)
-      .then(data => {
+    Promise.all([
+      api("/products", {}, dispatch),
+      api("/categories", {}, dispatch).catch(() => ({})),
+    ])
+      .then(([data, catData]) => {
         if (!cancelled && data.products) dispatch({ type: "SET_PRODUCTS", payload: data.products });
+        if (!cancelled && catData?.categories) dispatch({ type: "SET_PRODUCT_CATEGORIES", payload: catData.categories });
       })
       .catch(err => {
         if (!cancelled) dispatch({ type: "ADD_TOAST", payload: { type: "error", message: err.message || "Erro ao carregar produtos" } });
@@ -2328,6 +2589,11 @@ function HomePage() {
 
   const displayList = loading ? [] : allFiltered;
 
+  const categoryChips =
+    state.productCategories.filter(c => c.active !== false).length > 0
+      ? state.productCategories.filter(c => c.active !== false)
+      : FALLBACK_CATEGORIES.map((name) => ({ name, active: true }));
+
   return (
     <div className="min-h-screen pb-20" style={getSiteBackgroundStyle(state.siteConfig)}>
       <div
@@ -2372,16 +2638,17 @@ function HomePage() {
         >
           Todos
         </button>
-        {CATEGORIES.map(cat => {
-          const count = state.products.filter(p => p.active && p.category === cat).length;
-          const active = state.filters.categories.includes(cat);
+        {categoryChips.map(cat => {
+          const name = cat.name;
+          const count = state.products.filter(p => p.active && p.category === name).length;
+          const active = state.filters.categories.includes(name);
           return (
             <button
-              key={cat}
-              onClick={() => toggleCategory(cat)}
+              key={name}
+              onClick={() => toggleCategory(name)}
               className={`shrink-0 px-4 py-2 rounded-xl text-sm font-medium transition-all flex items-center gap-1.5 ${active ? "bg-violet-500/15 border border-violet-500/25 text-violet-300" : "bg-white/5 border border-white/10 text-zinc-400 hover:bg-white/10 hover:text-zinc-200"}`}
             >
-              {cat} <span className="text-xs opacity-75">({count})</span>
+              {name} <span className="text-xs opacity-75">({count})</span>
             </button>
           );
         })}
@@ -2437,13 +2704,14 @@ function HomePage() {
             <div className="space-y-4">
               <div>
                 <p className="text-xs text-zinc-500 uppercase mb-2">Categoria</p>
-                {CATEGORIES.map(cat => {
-                  const count = state.products.filter(p => p.active && p.category === cat).length;
-                  const checked = state.filters.categories.includes(cat);
+                {categoryChips.map(cat => {
+                  const name = cat.name;
+                  const count = state.products.filter(p => p.active && p.category === name).length;
+                  const checked = state.filters.categories.includes(name);
                   return (
-                    <label key={cat} className="flex items-center gap-2 py-1.5 cursor-pointer">
-                      <input type="checkbox" checked={checked} onChange={() => toggleCategory(cat)} className="rounded border-white/20 bg-white/5 text-violet-500 focus:ring-violet-500/50" />
-                      <span className="text-sm text-zinc-300">{cat}</span>
+                    <label key={name} className="flex items-center gap-2 py-1.5 cursor-pointer">
+                      <input type="checkbox" checked={checked} onChange={() => toggleCategory(name)} className="rounded border-white/20 bg-white/5 text-violet-500 focus:ring-violet-500/50" />
+                      <span className="text-sm text-zinc-300">{name}</span>
                       <span className="text-xs text-zinc-500">({count})</span>
                     </label>
                   );
@@ -2653,7 +2921,7 @@ function CartPage() {
   }).filter(i => i.product);
 
   const subtotal = cartItems.reduce((sum, i) => sum + i.product.price * i.quantity, 0);
-  const shipping = 15;
+  const shipping = getFixedShippingBRL(state.siteConfig);
   const total = subtotal + shipping;
 
   if (cartItems.length === 0) {
@@ -4837,6 +5105,10 @@ function AdminSiteSettings() {
     btnPrimaryFrom: state.siteConfig?.btnPrimaryFrom ?? "#7c3aed",
     btnPrimaryTo: state.siteConfig?.btnPrimaryTo ?? "#6366f1",
     btnSecondary: state.siteConfig?.btnSecondary ?? "#7c3aed",
+    fontFamily: state.siteConfig?.fontFamily ?? "Plus Jakarta Sans",
+    borderRadius: state.siteConfig?.borderRadius ?? "0.75rem",
+    enableAnimations: state.siteConfig?.enableAnimations ?? true,
+    enableHoverEffects: state.siteConfig?.enableHoverEffects ?? true,
   };
 
   const [form, setForm] = useState(defaultForm);
@@ -4865,8 +5137,12 @@ function AdminSiteSettings() {
       btnPrimaryFrom: state.siteConfig.btnPrimaryFrom ?? defaultForm.btnPrimaryFrom,
       btnPrimaryTo: state.siteConfig.btnPrimaryTo ?? defaultForm.btnPrimaryTo,
       btnSecondary: state.siteConfig.btnSecondary ?? defaultForm.btnSecondary,
+      fontFamily: state.siteConfig.fontFamily ?? defaultForm.fontFamily,
+      borderRadius: state.siteConfig.borderRadius ?? defaultForm.borderRadius,
+      enableAnimations: state.siteConfig.enableAnimations ?? defaultForm.enableAnimations,
+      enableHoverEffects: state.siteConfig.enableHoverEffects ?? defaultForm.enableHoverEffects,
     });
-  }, [state.siteConfigLoaded, state.siteConfig]);  
+  }, [state.siteConfigLoaded, state.siteConfig]);
 
   const ensureLoaded = async () => {
     if (state.siteConfigLoaded && state.siteConfig) return;
@@ -4945,6 +5221,10 @@ function AdminSiteSettings() {
       fd.append("btnPrimaryFrom", form.btnPrimaryFrom ?? "#7c3aed");
       fd.append("btnPrimaryTo", form.btnPrimaryTo ?? "#6366f1");
       fd.append("btnSecondary", form.btnSecondary ?? "#7c3aed");
+      fd.append("fontFamily", form.fontFamily ?? "Plus Jakarta Sans");
+      fd.append("borderRadius", form.borderRadius ?? "0.75rem");
+      fd.append("enableAnimations", form.enableAnimations ? "1" : "0");
+      fd.append("enableHoverEffects", form.enableHoverEffects ? "1" : "0");
       if (bannerFile) fd.append("banner_image", bannerFile);
       if (storeLogoFile) fd.append("store_logo_image", storeLogoFile);
       if (backgroundFile) fd.append("site_background_image", backgroundFile);
@@ -5196,6 +5476,73 @@ function AdminSiteSettings() {
             </div>
           </div>
 
+          <div>
+            <p className="text-xs text-zinc-500 mb-3">Personalização Avançada</p>
+            <div className="space-y-4 p-4 rounded-xl bg-white/5 border border-white/10">
+              <div>
+                <label className="block text-xs text-zinc-400 mb-2">Fonte do site</label>
+                <select
+                  value={form.fontFamily}
+                  onChange={(e) => setForm(f => ({ ...f, fontFamily: e.target.value }))}
+                  className="w-full px-3 py-2.5 rounded-xl bg-white/5 border border-white/10 text-sm text-white focus:outline-none focus:ring-2 focus:ring-violet-500/40"
+                >
+                  <option value="Plus Jakarta Sans" className="bg-zinc-900">Plus Jakarta Sans (Padrão)</option>
+                  <option value="Inter" className="bg-zinc-900">Inter</option>
+                  <option value="Outfit" className="bg-zinc-900">Outfit</option>
+                  <option value="Poppins" className="bg-zinc-900">Poppins</option>
+                  <option value="Roboto" className="bg-zinc-900">Roboto</option>
+                  <option value="Montserrat" className="bg-zinc-900">Montserrat</option>
+                  <option value="Quicksand" className="bg-zinc-900">Quicksand</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-xs text-zinc-400 mb-2">Arredondamento (border-radius)</label>
+                <select
+                  value={form.borderRadius}
+                  onChange={(e) => setForm(f => ({ ...f, borderRadius: e.target.value }))}
+                  className="w-full px-3 py-2.5 rounded-xl bg-white/5 border border-white/10 text-sm text-white focus:outline-none focus:ring-2 focus:ring-violet-500/40"
+                >
+                  <option value="0rem" className="bg-zinc-900">Quadrado (0px)</option>
+                  <option value="0.5rem" className="bg-zinc-900">Pequeno (8px)</option>
+                  <option value="0.75rem" className="bg-zinc-900">Padrão (12px)</option>
+                  <option value="1rem" className="bg-zinc-900">Médio (16px)</option>
+                  <option value="1.5rem" className="bg-zinc-900">Grande (24px)</option>
+                  <option value="2rem" className="bg-zinc-900">Extra Grande (32px)</option>
+                  <option value="9999px" className="bg-zinc-900">Redondo (Pílula)</option>
+                </select>
+              </div>
+
+              <div className="flex items-center justify-between">
+                <div>
+                  <span className="text-xs text-zinc-300">Animações</span>
+                  <p className="text-[10px] text-zinc-500">Ativar transições e animações</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setForm(f => ({ ...f, enableAnimations: !f.enableAnimations }))}
+                  className={`w-12 h-6 rounded-full transition-colors ${form.enableAnimations ? "bg-violet-600" : "bg-zinc-700"}`}
+                >
+                  <div className={`w-5 h-5 rounded-full bg-white shadow transform transition-transform ${form.enableAnimations ? "translate-x-6" : "translate-x-0.5"}`} />
+                </button>
+              </div>
+
+              <div className="flex items-center justify-between">
+                <div>
+                  <span className="text-xs text-zinc-300">Efeitos hover</span>
+                  <p className="text-[10px] text-zinc-500">Lifts, brilhos e transições</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setForm(f => ({ ...f, enableHoverEffects: !f.enableHoverEffects }))}
+                  className={`w-12 h-6 rounded-full transition-colors ${form.enableHoverEffects ? "bg-violet-600" : "bg-zinc-700"}`}
+                >
+                  <div className={`w-5 h-5 rounded-full bg-white shadow transform transition-transform ${form.enableHoverEffects ? "translate-x-6" : "translate-x-0.5"}`} />
+                </button>
+              </div>
+            </div>
+          </div>
+
           <div className="flex gap-3 pt-2">
             <button
               type="button"
@@ -5250,17 +5597,25 @@ function AdminProducts() {
 
   useEffect(() => {
     loadProducts();
+    api("/categories?includeInactive=true", {}, dispatch)
+      .then(d => d.categories && dispatch({ type: "SET_PRODUCT_CATEGORIES", payload: d.categories }))
+      .catch(() => {});
   }, [dispatch]);
 
   const list = state.adminProducts.filter(p => !search.trim() || p.name.toLowerCase().includes(search.toLowerCase()));
+  const adminCategoryNames = (() => {
+    const active = state.productCategories.filter(c => c.active !== false).map(c => c.name);
+    return active.length ? active : [...FALLBACK_CATEGORIES];
+  })();
+  const defaultNewCategory = adminCategoryNames[0] || "Eletrônicos";
 
   const openCreate = () => {
-    setForm({ name: "", description: "", category: "Eletrônicos", price: "", originalPrice: "", stock: "", image: "", active: true, imageFile: null, imagePreview: null, imageRemoved: false, currentImage: null });
+    setForm({ name: "", description: "", category: defaultNewCategory, price: "", originalPrice: "", stock: "", image: "", active: true, imageFile: null, imagePreview: null, imageRemoved: false, currentImage: null });
     setFormErrors({});
     setModalProduct("new");
   };
   const openEdit = (p) => {
-    setForm({ name: p.name, description: p.description || "", category: p.category || "Eletrônicos", price: String(p.price ?? ""), originalPrice: p.originalPrice != null ? String(p.originalPrice) : "", stock: String(p.stock ?? 0), image: p.image || "", active: !!p.active, imageFile: null, imagePreview: null, imageRemoved: false, currentImage: p.image || null });
+    setForm({ name: p.name, description: p.description || "", category: p.category || defaultNewCategory, price: String(p.price ?? ""), originalPrice: p.originalPrice != null ? String(p.originalPrice) : "", stock: String(p.stock ?? 0), image: p.image || "", active: !!p.active, imageFile: null, imagePreview: null, imageRemoved: false, currentImage: p.image || null });
     setFormErrors({});
     setModalProduct(p);
   };
@@ -5463,7 +5818,7 @@ function AdminProducts() {
                 </div>
                 <div><label className="block text-xs text-zinc-500 mb-1">Nome</label><input value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} className="w-full px-3 py-2 rounded-lg bg-white/5 border border-white/10 text-white text-sm" placeholder="Nome do produto" />{formErrors.name && <p className="text-rose-400 text-xs mt-1">{formErrors.name}</p>}</div>
                 <div><label className="block text-xs text-zinc-500 mb-1">Descrição</label><textarea value={form.description} onChange={e => setForm(f => ({ ...f, description: e.target.value }))} rows={3} className="w-full px-3 py-2 rounded-lg bg-white/5 border border-white/10 text-white text-sm resize-none" placeholder="Descrição" />{formErrors.description && <p className="text-rose-400 text-xs mt-1">{formErrors.description}</p>}</div>
-                <div><label className="block text-xs text-zinc-500 mb-1">Categoria</label><select value={form.category} onChange={e => setForm(f => ({ ...f, category: e.target.value }))} className="w-full px-3 py-2 rounded-lg bg-white/5 border border-white/10 text-white text-sm">{CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}</select></div>
+                <div><label className="block text-xs text-zinc-500 mb-1">Categoria</label><select value={form.category} onChange={e => setForm(f => ({ ...f, category: e.target.value }))} className="w-full px-3 py-2 rounded-lg bg-white/5 border border-white/10 text-white text-sm">{adminCategoryNames.map(c => <option key={c} value={c}>{c}</option>)}</select></div>
                 <div className="grid grid-cols-2 gap-3"><div><label className="block text-xs text-zinc-500 mb-1">Preço (R$)</label><input type="number" step="0.01" value={form.price} onChange={e => setForm(f => ({ ...f, price: e.target.value }))} className="w-full px-3 py-2 rounded-lg bg-white/5 border border-white/10 text-white text-sm" placeholder="0.00" />{formErrors.price && <p className="text-rose-400 text-xs mt-1">{formErrors.price}</p>}</div><div><label className="block text-xs text-zinc-500 mb-1">Preço Original (R$)</label><input type="number" step="0.01" value={form.originalPrice} onChange={e => setForm(f => ({ ...f, originalPrice: e.target.value }))} className="w-full px-3 py-2 rounded-lg bg-white/5 border border-white/10 text-white text-sm" placeholder="Opcional" /><p className="text-xs text-zinc-500 mt-1">Se preenchido, exibe preço riscado na loja</p>{formErrors.originalPrice && <p className="text-rose-400 text-xs mt-1">{formErrors.originalPrice}</p>}</div></div>
                 <div className="grid grid-cols-2 gap-3"><div><label className="block text-xs text-zinc-500 mb-1">Estoque</label><input type="number" min="0" step="1" value={form.stock} onChange={e => setForm(f => ({ ...f, stock: e.target.value }))} className="w-full px-3 py-2 rounded-lg bg-white/5 border border-white/10 text-white text-sm" />{formErrors.stock && <p className="text-rose-400 text-xs mt-1">{formErrors.stock}</p>}</div><div className="flex items-center gap-2 pt-6"><label className="flex items-center gap-2 cursor-pointer"><input type="checkbox" checked={form.active} onChange={e => setForm(f => ({ ...f, active: e.target.checked }))} className="rounded border-white/20 text-violet-500 focus:ring-violet-500/40" /><span className="text-sm text-zinc-300">Ativo</span></label></div></div>
               </div>
@@ -5526,8 +5881,19 @@ function AdminUsers() {
   let list = state.adminUsers.filter(u => !search.trim() || u.name?.toLowerCase().includes(search.toLowerCase()) || u.email?.toLowerCase().includes(search.toLowerCase()));
   if (rolePill === "admin") list = list.filter(u => u.role === "admin");
   if (rolePill === "customer") list = list.filter(u => u.role === "customer");
-  if (statusPill === "active") list = list.filter(u => u.active !== false);
+  if (statusPill === "active") list = list.filter(u => u.active !== false && u.approved !== false);
   if (statusPill === "inactive") list = list.filter(u => u.active === false);
+  if (statusPill === "pending") list = list.filter(u => u.role === "customer" && u.approved === false);
+
+  const handleApprove = async (user) => {
+    try {
+      const data = await api(`/users/${user.id}/approve`, { method: "PATCH" }, dispatch);
+      dispatch({ type: "UPDATE_ADMIN_USER", payload: { ...user, ...(data.user ?? {}), approved: true, active: true } });
+      dispatch({ type: "ADD_TOAST", payload: { type: "success", message: "Cadastro aprovado." } });
+    } catch (err) {
+      dispatch({ type: "ADD_TOAST", payload: { type: "error", message: err.message || "Erro ao aprovar" } });
+    }
+  };
 
   const handleToggleActive = async (user) => {
     if (user.id === state.currentUser?.id) return;
@@ -5567,7 +5933,7 @@ function AdminUsers() {
       <div className="flex flex-wrap gap-3 mb-4 items-center">
         <input type="text" placeholder="Buscar por nome ou e-mail..." value={search} onChange={e => setSearch(e.target.value)} className="px-3 py-2 rounded-lg bg-white/5 border border-white/10 text-white text-sm min-w-[200px] focus:outline-none focus:ring-2 focus:ring-violet-500/40" />
         <div className="flex gap-2">{[["Todos", "all"], ["Admins", "admin"], ["Clientes", "customer"]].map(([l, v]) => <button key={v} onClick={() => setRolePill(v)} className={`px-3 py-1.5 rounded-lg text-sm ${rolePill === v ? "bg-violet-500/20 text-violet-300" : "text-zinc-400 hover:bg-white/5"}`}>{l}</button>)}</div>
-        <div className="flex gap-2">{[["Todos", "all"], ["Ativos", "active"], ["Desativados", "inactive"]].map(([l, v]) => <button key={v} onClick={() => setStatusPill(v)} className={`px-3 py-1.5 rounded-lg text-sm ${statusPill === v ? "bg-violet-500/20 text-violet-300" : "text-zinc-400 hover:bg-white/5"}`}>{l}</button>)}</div>
+        <div className="flex flex-wrap gap-2">{[["Todos", "all"], ["Ativos", "active"], ["Desativados", "inactive"], ["Pendentes", "pending"]].map(([l, v]) => <button key={v} type="button" onClick={() => setStatusPill(v)} className={`px-3 py-1.5 rounded-lg text-sm ${statusPill === v ? "bg-violet-500/20 text-violet-300" : "text-zinc-400 hover:bg-white/5"}`}>{l}</button>)}</div>
         <button
           type="button"
           onClick={() => { setCreateForm({ name: "", email: "", phone: "", password: "", role: "customer" }); setCreateModalOpen(true); }}
@@ -5597,10 +5963,20 @@ function AdminUsers() {
                 <td className="p-3 text-zinc-300">{u.email}</td>
                 <td className="p-3 text-zinc-300">{u.phone ? formatPhone(u.phone) : "—"}</td>
                 <td className="p-3"><span className={`px-2 py-0.5 rounded text-xs ${u.role === "admin" ? "bg-violet-500/15 text-violet-300" : "bg-zinc-500/15 text-zinc-300"}`}>{u.role === "admin" ? "Admin" : "Cliente"}</span></td>
-                <td className="p-3"><span className={`px-2 py-0.5 rounded text-xs ${u.active !== false ? "bg-emerald-500/15 text-emerald-300" : "bg-rose-500/15 text-rose-300"}`}>{u.active !== false ? "Ativo" : "Desativado"}</span></td>
+                <td className="p-3">
+                  <div className="flex flex-col gap-1">
+                    {u.role === "customer" && u.approved === false && (
+                      <span className="px-2 py-0.5 rounded text-xs w-fit bg-amber-500/15 text-amber-300">Aguardando aprovação</span>
+                    )}
+                    <span className={`px-2 py-0.5 rounded text-xs w-fit ${u.active !== false ? "bg-emerald-500/15 text-emerald-300" : "bg-rose-500/15 text-rose-300"}`}>{u.active !== false ? "Ativo" : "Desativado"}</span>
+                  </div>
+                </td>
                 <td className="p-3 text-zinc-300">{u.orderCount ?? u.order_count ?? 0}</td>
                 <td className="p-3 text-zinc-400">{u.createdAt ? formatDate(u.createdAt) : (u.created_at ? formatDate(u.created_at) : "—")}</td>
-                <td className="p-3 flex items-center gap-2">
+                <td className="p-3 flex flex-wrap items-center gap-2">
+                  {u.role === "customer" && u.approved === false && (
+                    <button type="button" onClick={() => handleApprove(u)} className="px-2 py-1 rounded text-xs font-medium bg-violet-600 text-white hover:bg-violet-500">Aprovar</button>
+                  )}
                   <button type="button" onClick={() => openOrdersModal(u)} className="p-2 rounded-lg hover:bg-white/5 text-zinc-400 hover:text-violet-400" title="Ver pedidos"><Package size={16} /></button>
                   <select value={u.role} onChange={e => { const v = e.target.value; if (v === u.role) return; setRoleConfirm({ user: u, newRole: v }); }} className="bg-white/5 border border-white/10 rounded-lg px-2 py-1 text-zinc-300 text-xs focus:outline-none focus:ring-2 focus:ring-violet-500/40" disabled={u.id === state.currentUser?.id}><option value="customer">Cliente</option><option value="admin">Admin</option></select>
                   <button type="button" onClick={() => u.id !== state.currentUser?.id && (u.active !== false ? setDeactivateConfirm(u) : handleToggleActive(u))} disabled={u.id === state.currentUser?.id} title={u.id === state.currentUser?.id ? "Não é possível desativar sua conta" : ""} className={`px-2 py-1 rounded text-xs font-medium ${u.active !== false ? "bg-emerald-500/15 text-emerald-300 hover:bg-rose-500/15 hover:text-rose-300" : "bg-rose-500/15 text-rose-300"}`}>{u.active !== false ? "Ativo" : "Desativado"}</button>
@@ -5760,6 +6136,320 @@ function AdminUsers() {
 }
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// ADMIN — CATEGORIAS
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+function AdminCategories() {
+  const { dispatch } = useApp();
+  const [list, setList] = useState([]);
+  const [name, setName] = useState("");
+  const [emoji, setEmoji] = useState("📦");
+  const [saving, setSaving] = useState(false);
+  const [editing, setEditing] = useState(null);
+
+  const load = () =>
+    api("/categories?includeInactive=true", {}, dispatch)
+      .then(d => {
+        const rows = d.categories || [];
+        setList(rows);
+        dispatch({ type: "SET_PRODUCT_CATEGORIES", payload: rows });
+      })
+      .catch(() => setList([]));
+
+  useEffect(() => {
+    load();
+  }, [dispatch]);
+
+  return (
+    <div className="space-y-6">
+      <div>
+        <h1 className="text-2xl font-bold text-white" style={{ fontFamily: "'Outfit', sans-serif" }}>Categorias</h1>
+        <p className="text-zinc-500 text-sm mt-1">Criar, editar e excluir categorias de produtos</p>
+      </div>
+      <div className="rounded-xl border border-white/[0.06] p-4 space-y-3 max-w-lg" style={{ background: "rgba(255,255,255,0.03)" }}>
+        <p className="text-xs text-zinc-500 uppercase">Nova categoria</p>
+        <div className="flex flex-wrap gap-2">
+          <input value={name} onChange={e => setName(e.target.value)} placeholder="Nome" className="flex-1 min-w-[140px] px-3 py-2 rounded-lg bg-white/5 border border-white/10 text-white text-sm" />
+          <input value={emoji} onChange={e => setEmoji(e.target.value.slice(0, 8))} className="w-20 px-3 py-2 rounded-lg bg-white/5 border border-white/10 text-white text-sm text-center" title="Emoji" />
+          <button
+            type="button"
+            disabled={saving || name.trim().length < 2}
+            onClick={async () => {
+              setSaving(true);
+              try {
+                await api("/categories", { method: "POST", body: { name: name.trim(), emoji: emoji || "📦" } }, dispatch);
+                setName("");
+                setEmoji("📦");
+                dispatch({ type: "ADD_TOAST", payload: { type: "success", message: "Categoria criada" } });
+                load();
+              } catch (err) {
+                dispatch({ type: "ADD_TOAST", payload: { type: "error", message: err.message || "Erro" } });
+              } finally {
+                setSaving(false);
+              }
+            }}
+            className="px-4 py-2 rounded-lg bg-violet-600 text-white text-sm disabled:opacity-50"
+          >
+            Adicionar
+          </button>
+        </div>
+      </div>
+      <div className="rounded-xl border border-white/[0.06] overflow-hidden">
+        <table className="w-full text-left text-sm">
+          <thead>
+            <tr className="text-zinc-500 text-xs border-b border-white/[0.04]">
+              <th className="p-3">Nome</th>
+              <th className="p-3">Emoji</th>
+              <th className="p-3">Ativa</th>
+              <th className="p-3">Ações</th>
+            </tr>
+          </thead>
+          <tbody>
+            {list.map(c => (
+              <tr key={c.id} className="border-b border-white/[0.04]">
+                <td className="p-3 text-white">
+                  {editing?.id === c.id ? (
+                    <input value={editing.name} onChange={e => setEditing({ ...editing, name: e.target.value })} className="w-full px-2 py-1 rounded bg-white/5 border border-white/10 text-white text-sm" />
+                  ) : (
+                    c.name
+                  )}
+                </td>
+                <td className="p-3 text-xl">
+                  {editing?.id === c.id ? (
+                    <input value={editing.emoji} onChange={e => setEditing({ ...editing, emoji: e.target.value.slice(0, 8) })} className="w-16 px-2 py-1 rounded bg-white/5 border border-white/10 text-white text-sm" />
+                  ) : (
+                    c.emoji || "📦"
+                  )}
+                </td>
+                <td className="p-3">
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      try {
+                        await api(`/categories/${c.id}`, { method: "PUT", body: { name: c.name, emoji: c.emoji || "📦", active: !c.active, sortOrder: c.sortOrder ?? 0 } }, dispatch);
+                        load();
+                      } catch (err) {
+                        dispatch({ type: "ADD_TOAST", payload: { type: "error", message: err.message } });
+                      }
+                    }}
+                    className={`text-xs px-2 py-1 rounded ${c.active !== false ? "bg-emerald-500/15 text-emerald-300" : "bg-zinc-600/40 text-zinc-400"}`}
+                  >
+                    {c.active !== false ? "Sim" : "Não"}
+                  </button>
+                </td>
+                <td className="p-3 flex flex-wrap gap-2">
+                  {editing?.id === c.id ? (
+                    <>
+                      <button
+                        type="button"
+                        className="text-xs px-2 py-1 rounded bg-violet-600 text-white"
+                        onClick={async () => {
+                          try {
+                            await api(`/categories/${c.id}`, { method: "PUT", body: { name: editing.name.trim(), emoji: editing.emoji, active: c.active !== false, sortOrder: c.sortOrder ?? 0 } }, dispatch);
+                            setEditing(null);
+                            load();
+                            dispatch({ type: "ADD_TOAST", payload: { type: "success", message: "Salvo" } });
+                          } catch (err) {
+                            dispatch({ type: "ADD_TOAST", payload: { type: "error", message: err.message } });
+                          }
+                        }}
+                      >
+                        Salvar
+                      </button>
+                      <button type="button" className="text-xs text-zinc-400" onClick={() => setEditing(null)}>Cancelar</button>
+                    </>
+                  ) : (
+                    <>
+                      <button type="button" className="text-xs text-violet-400" onClick={() => setEditing({ id: c.id, name: c.name, emoji: c.emoji || "📦" })}>Editar</button>
+                      <button
+                        type="button"
+                        className="text-xs text-rose-400"
+                        onClick={async () => {
+                          if (!confirm(`Excluir categoria "${c.name}"?`)) return;
+                          try {
+                            await api(`/categories/${c.id}`, { method: "DELETE" }, dispatch);
+                            load();
+                            dispatch({ type: "ADD_TOAST", payload: { type: "success", message: "Removida" } });
+                          } catch (err) {
+                            dispatch({ type: "ADD_TOAST", payload: { type: "error", message: err.message } });
+                          }
+                        }}
+                      >
+                        Excluir
+                      </button>
+                    </>
+                  )}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        {list.length === 0 && <p className="p-6 text-center text-zinc-500 text-sm">Nenhuma categoria.</p>}
+      </div>
+    </div>
+  );
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// ADMIN — CUPONS E FRETE
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+function AdminCoupons() {
+  const { dispatch } = useApp();
+  const [list, setList] = useState([]);
+  const [code, setCode] = useState("");
+  const [percent, setPercent] = useState("10");
+  const [saving, setSaving] = useState(false);
+  const [shippingFixedBRL, setShippingFixedBRL] = useState("15");
+  const [shippingSaving, setShippingSaving] = useState(false);
+
+  const load = () =>
+    api("/coupons", {}, dispatch)
+      .then(d => setList(d.coupons || []))
+      .catch(() => setList([]));
+
+  useEffect(() => {
+    load();
+    api("/settings/site", {}, dispatch)
+      .then((d) => {
+        dispatch({ type: "SET_SITE_CONFIG", payload: d || {} });
+        setShippingFixedBRL(String(d?.shippingFixedBRL ?? 15));
+      })
+      .catch(() => {});
+  }, [dispatch]);
+
+  return (
+    <div className="space-y-6">
+      <div>
+        <h1 className="text-2xl font-bold text-white" style={{ fontFamily: "'Outfit', sans-serif" }}>Cupons e frete</h1>
+        <p className="text-zinc-500 text-sm mt-1">Cupons de desconto · frete fixo para todos os endereços</p>
+      </div>
+      <div className="rounded-xl border border-white/[0.06] p-4 space-y-4 max-w-lg" style={{ background: "rgba(255,255,255,0.03)" }}>
+        <div>
+          <label className="block text-xs text-zinc-500 mb-1.5">Frete fixo (R$)</label>
+          <div className="flex flex-col sm:flex-row gap-2">
+            <input
+              type="number"
+              min="0"
+              step="0.01"
+              inputMode="decimal"
+              value={shippingFixedBRL}
+              onChange={(e) => setShippingFixedBRL(e.target.value)}
+              className="flex-1 px-3 py-2 rounded-lg bg-white/5 border border-white/10 text-white text-sm"
+            />
+            <button
+              type="button"
+              disabled={shippingSaving}
+              onClick={async () => {
+                setShippingSaving(true);
+                try {
+                  const fd = new FormData();
+                  fd.append("shippingFixedBRL", String(shippingFixedBRL ?? "15").replace(",", "."));
+                  await api("/settings/site", { method: "PUT", body: fd }, dispatch);
+                  const fresh = await api("/settings/site", {}, dispatch);
+                  dispatch({ type: "SET_SITE_CONFIG", payload: fresh || {} });
+                  setShippingFixedBRL(String(fresh?.shippingFixedBRL ?? 15));
+                  dispatch({ type: "ADD_TOAST", payload: { type: "success", message: "Frete fixo salvo." } });
+                } catch (err) {
+                  dispatch({ type: "ADD_TOAST", payload: { type: "error", message: err?.message || "Erro ao salvar frete." } });
+                } finally {
+                  setShippingSaving(false);
+                }
+              }}
+              className="px-4 py-2 rounded-lg bg-violet-600 text-white text-sm disabled:opacity-50 shrink-0"
+            >
+              {shippingSaving ? "…" : "Salvar frete"}
+            </button>
+          </div>
+          <p className="text-zinc-500 text-xs mt-1.5">O checkout e o total do pedido usam este valor no servidor.</p>
+        </div>
+      </div>
+      <div className="rounded-xl border border-white/[0.06] p-4 space-y-3 max-w-lg" style={{ background: "rgba(255,255,255,0.03)" }}>
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+          <input value={code} onChange={e => setCode(e.target.value.toUpperCase())} placeholder="CÓDIGO" className="px-3 py-2 rounded-lg bg-white/5 border border-white/10 text-white text-sm uppercase" />
+          <input type="number" min="1" max="100" value={percent} onChange={e => setPercent(e.target.value)} placeholder="%" className="px-3 py-2 rounded-lg bg-white/5 border border-white/10 text-white text-sm" />
+          <button
+            type="button"
+            disabled={saving || code.trim().length < 3}
+            onClick={async () => {
+              setSaving(true);
+              try {
+                await api("/coupons", { method: "POST", body: { code: code.trim(), percent: parseFloat(percent) } }, dispatch);
+                setCode("");
+                setPercent("10");
+                dispatch({ type: "ADD_TOAST", payload: { type: "success", message: "Cupom criado" } });
+                load();
+              } catch (err) {
+                dispatch({ type: "ADD_TOAST", payload: { type: "error", message: err.message } });
+              } finally {
+                setSaving(false);
+              }
+            }}
+            className="px-4 py-2 rounded-lg bg-violet-600 text-white text-sm disabled:opacity-50"
+          >
+            Criar
+          </button>
+        </div>
+      </div>
+      <div className="rounded-xl border border-white/[0.06] overflow-x-auto">
+        <table className="w-full text-left text-sm">
+          <thead>
+            <tr className="text-zinc-500 text-xs border-b border-white/[0.04]">
+              <th className="p-3">Código</th>
+              <th className="p-3">%</th>
+              <th className="p-3">Ativo</th>
+              <th className="p-3">Ações</th>
+            </tr>
+          </thead>
+          <tbody>
+            {list.map(c => (
+              <tr key={c.id} className="border-b border-white/[0.04]">
+                <td className="p-3 text-violet-300 font-mono">{c.code}</td>
+                <td className="p-3 text-white">{c.percent}%</td>
+                <td className="p-3">
+                  <button
+                    type="button"
+                    className={`text-xs px-2 py-1 rounded ${c.active ? "bg-emerald-500/15 text-emerald-300" : "bg-zinc-600/40 text-zinc-400"}`}
+                    onClick={async () => {
+                      try {
+                        await api(`/coupons/${c.id}`, { method: "PATCH", body: { active: !c.active } }, dispatch);
+                        load();
+                      } catch (err) {
+                        dispatch({ type: "ADD_TOAST", payload: { type: "error", message: err.message } });
+                      }
+                    }}
+                  >
+                    {c.active ? "Sim" : "Não"}
+                  </button>
+                </td>
+                <td className="p-3">
+                  <button
+                    type="button"
+                    className="text-xs text-rose-400"
+                    onClick={async () => {
+                      if (!confirm(`Excluir cupom ${c.code}?`)) return;
+                      try {
+                        await api(`/coupons/${c.id}`, { method: "DELETE" }, dispatch);
+                        load();
+                      } catch (err) {
+                        dispatch({ type: "ADD_TOAST", payload: { type: "error", message: err.message } });
+                      }
+                    }}
+                  >
+                    Excluir
+                  </button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        {list.length === 0 && <p className="p-6 text-center text-zinc-500 text-sm">Nenhum cupom.</p>}
+      </div>
+    </div>
+  );
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 // ADMIN — LAYOUT (SIDEBAR + CONTEÚDO)
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
@@ -5786,6 +6476,18 @@ function AdminDashboard() {
       .catch(() => {});
   }, [isAdmin, state.siteConfigLoaded, dispatch]);
 
+  // Menu mobile: acima do header global (z-40), toasts (z-50) e chat; evita scroll por trás do overlay
+  useEffect(() => {
+    if (!sidebarOpen) return;
+    const mq = window.matchMedia("(max-width: 1023px)");
+    if (!mq.matches) return;
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.body.style.overflow = prev;
+    };
+  }, [sidebarOpen]);
+
   if (!isAdmin) return null;
 
   const storeIcon = state.storeIcon || "Store";
@@ -5801,7 +6503,10 @@ function AdminDashboard() {
 
   return (
     <div className="min-h-screen flex" style={getSiteBackgroundStyle(state.siteConfig)}>
-      <aside className={`fixed lg:static inset-y-0 left-0 z-30 w-[240px] flex-shrink-0 border-r border-white/[0.06] flex flex-col transition-transform duration-300 lg:translate-x-0 ${sidebarOpen ? "translate-x-0" : "-translate-x-full"}`} style={{ background: "rgba(255,255,255,0.02)" }}>
+      <aside
+        className={`fixed lg:static inset-y-0 left-0 z-[110] lg:z-auto w-[240px] flex-shrink-0 border-r border-white/[0.06] flex flex-col transition-transform duration-300 lg:translate-x-0 ${sidebarOpen ? "translate-x-0" : "-translate-x-full"}`}
+        style={{ background: "rgba(255,255,255,0.02)" }}
+      >
         <div className="p-4 border-b border-white/[0.06] flex items-center justify-between lg:justify-center">
           <div className="flex items-center gap-2">
             <button
@@ -5825,6 +6530,8 @@ function AdminDashboard() {
           {[
             { id: "overview", label: "Visão Geral", icon: BarChart3 },
             { id: "products", label: "Produtos", icon: Package },
+            { id: "categories", label: "Categorias", icon: FolderTree },
+            { id: "coupons", label: "Cupons e frete", icon: Ticket },
             { id: "users", label: "Usuários", icon: Users },
             { id: "support", label: "Atendimento", icon: MessageSquare },
             { id: "pix-settings", label: "Chave PIX", icon: Zap },
@@ -5846,13 +6553,21 @@ function AdminDashboard() {
           </button>
         </div>
       </aside>
-      {sidebarOpen && <div className="fixed inset-0 z-20 bg-black/50 lg:hidden" onClick={() => setSidebarOpen(false)} aria-hidden />}
+      {sidebarOpen && (
+        <div
+          className="fixed inset-0 z-[100] bg-black/60 backdrop-blur-sm lg:hidden"
+          onClick={() => setSidebarOpen(false)}
+          aria-hidden
+        />
+      )}
       <div className="flex-1 min-w-0 p-4 sm:p-6">
         <div className="lg:hidden mb-4">
           <button type="button" onClick={() => setSidebarOpen(true)} className="flex items-center gap-2 px-3 py-2 rounded-lg border border-white/10 text-zinc-400 text-sm">Menu</button>
         </div>
         {state.adminPage === "overview" && <AdminOverview />}
         {state.adminPage === "products" && <AdminProducts />}
+        {state.adminPage === "categories" && <AdminCategories />}
+        {state.adminPage === "coupons" && <AdminCoupons />}
         {state.adminPage === "users" && <AdminUsers />}
         {state.adminPage === "support" && <AdminSupport />}
         {state.adminPage === "pix-settings" && <AdminPixSettings />}
@@ -5887,6 +6602,32 @@ function PlaceholderPage({ title, emoji, description }) {
 // APP ROUTER & EXPORT
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
+/** Oculta o conteúdo ao sair da aba/app (não impede captura de ecrã do SO). */
+function PrivacyScreen() {
+  const { state } = useApp();
+  const [obscure, setObscure] = useState(false);
+  useEffect(() => {
+    const onVis = () => setObscure(document.visibilityState === "hidden");
+    onVis();
+    document.addEventListener("visibilitychange", onVis);
+    return () => document.removeEventListener("visibilitychange", onVis);
+  }, []);
+  if (!state.currentUser) return null;
+  if (!obscure) return null;
+  return (
+    <div
+      className="fixed inset-0 z-[9999] bg-zinc-950 flex flex-col items-center justify-center p-6 text-center"
+      style={{ WebkitUserSelect: "none", userSelect: "none" }}
+      aria-hidden
+    >
+      <p className="text-white text-sm font-medium max-w-xs">Conteúdo oculto neste ecrã</p>
+      <p className="text-zinc-500 text-xs mt-3 max-w-xs leading-relaxed">
+        Navegadores não bloqueiam capturas do sistema. Este painel reduz a exposição ao mudar de aplicação.
+      </p>
+    </div>
+  );
+}
+
 function AppRouter() {
   const { state, dispatch } = useApp();
   useIdleLogout(Boolean(state.currentUser), dispatch);
@@ -5904,11 +6645,14 @@ function AppRouter() {
 
   return (
     <>
-      <Header />
-      <main className="animate-fade-in">{pages[state.currentPage] || <HomePage />}</main>
-      {state.selectedProduct != null && <ProductDetailModal />}
-      <CartDrawer />
-      <ChatWidget />
+      <PrivacyScreen />
+      <div className={`min-h-screen ${state.currentUser ? "novamart-app-root" : ""}`}>
+        <Header />
+        <main className="animate-fade-in">{pages[state.currentPage] || <HomePage />}</main>
+        {state.selectedProduct != null && <ProductDetailModal />}
+        <CartDrawer />
+        <ChatWidget />
+      </div>
     </>
   );
 }

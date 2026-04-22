@@ -14,6 +14,7 @@ function userToResponse(row) {
     phone: row.phone,
     role: row.role,
     active: row.active === 1,
+    approved: row.approved !== 0 && row.approved != null,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -24,7 +25,7 @@ function userToResponse(row) {
 router.get("/", authenticate, requireAdmin, (req, res) => {
   const { search, role, active } = req.query;
   let sql = `
-    SELECT u.id, u.name, u.email, u.phone, u.role, u.active, u.created_at, u.updated_at,
+    SELECT u.id, u.name, u.email, u.phone, u.role, u.active, u.approved, u.created_at, u.updated_at,
            COUNT(o.id) as order_count
     FROM users u
     LEFT JOIN orders o ON o.user_id = u.id
@@ -84,11 +85,11 @@ router.post("/", authenticate, requireAdmin, (req, res) => {
   const userRole = role === "admin" ? "admin" : "customer";
 
   db.prepare(
-    "INSERT INTO users (id, name, email, phone, password_hash, role, active) VALUES (?, ?, ?, ?, ?, ?, 1)"
+    "INSERT INTO users (id, name, email, phone, password_hash, role, active, approved) VALUES (?, ?, ?, ?, ?, ?, 1, 1)"
   ).run(id, name.trim(), email.trim(), String(phone).trim(), hash, userRole);
 
   const row = db.prepare(
-    "SELECT id, name, email, phone, role, active, created_at, updated_at FROM users WHERE id = ?"
+    "SELECT id, name, email, phone, role, active, approved, created_at, updated_at FROM users WHERE id = ?"
   ).get(id);
 
   res.status(201).json({ user: userToResponse(row) });
@@ -101,7 +102,7 @@ router.get("/:id", authenticate, (req, res) => {
     return res.status(403).json({ error: true, message: "Acesso negado" });
   }
   const user = db.prepare(
-    "SELECT id, name, email, phone, role, active, created_at, updated_at FROM users WHERE id = ?"
+    "SELECT id, name, email, phone, role, active, approved, created_at, updated_at FROM users WHERE id = ?"
   ).get(req.params.id);
   if (!user) {
     return res.status(404).json({ error: true, message: "Usuário não encontrado" });
@@ -148,7 +149,24 @@ router.put("/:id", authenticate, requireAdmin, (req, res) => {
     UPDATE users SET name=?, phone=?, role=?, active=?, updated_at=datetime('now') WHERE id=?
   `).run(name, phone, role, active, req.params.id);
   const updated = db.prepare(
-    "SELECT id, name, email, phone, role, active, created_at, updated_at FROM users WHERE id = ?"
+    "SELECT id, name, email, phone, role, active, approved, created_at, updated_at FROM users WHERE id = ?"
+  ).get(req.params.id);
+  res.status(200).json({ user: userToResponse(updated) });
+});
+
+router.patch("/:id/approve", authenticate, requireAdmin, (req, res) => {
+  const user = db.prepare("SELECT * FROM users WHERE id = ?").get(req.params.id);
+  if (!user) {
+    return res.status(404).json({ error: true, message: "Usuário não encontrado" });
+  }
+  if (user.role !== "customer") {
+    return res.status(400).json({ error: true, message: "Apenas contas de cliente passam por aprovação" });
+  }
+  db.prepare(
+    "UPDATE users SET approved = 1, active = 1, updated_at = datetime('now') WHERE id = ?"
+  ).run(req.params.id);
+  const updated = db.prepare(
+    "SELECT id, name, email, phone, role, active, approved, created_at, updated_at FROM users WHERE id = ?"
   ).get(req.params.id);
   res.status(200).json({ user: userToResponse(updated) });
 });
@@ -157,6 +175,10 @@ router.patch("/:id/toggle-active", authenticate, requireAdmin, (req, res) => {
   const user = db.prepare("SELECT * FROM users WHERE id = ?").get(req.params.id);
   if (!user) {
     return res.status(404).json({ error: true, message: "Usuário não encontrado" });
+  }
+  const approved = user.approved !== 0 && user.approved != null;
+  if (user.role === "customer" && !approved) {
+    return res.status(400).json({ error: true, message: "Cliente ainda não aprovado — use o botão Aprovar." });
   }
   const newActive = user.active === 1 ? 0 : 1;
   if (req.user.id === req.params.id && newActive === 0) {
@@ -170,7 +192,7 @@ router.patch("/:id/toggle-active", authenticate, requireAdmin, (req, res) => {
   }
   db.prepare("UPDATE users SET active=?, updated_at=datetime('now') WHERE id=?").run(newActive, req.params.id);
   const updated = db.prepare(
-    "SELECT id, name, email, phone, role, active, created_at, updated_at FROM users WHERE id = ?"
+    "SELECT id, name, email, phone, role, active, approved, created_at, updated_at FROM users WHERE id = ?"
   ).get(req.params.id);
   res.status(200).json({ user: userToResponse(updated) });
 });

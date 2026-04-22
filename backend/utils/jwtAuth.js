@@ -26,6 +26,7 @@ export function rotateSessionToken(userId) {
 }
 
 export function userToResponse(row) {
+  const approved = row.approved !== 0 && row.approved != null;
   return {
     id: row.id,
     name: row.name,
@@ -33,5 +34,6 @@ export function userToResponse(row) {
     phone: row.phone,
     role: row.role,
     active: row.active === 1,
+    approved,
   };
 }

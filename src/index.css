@@ -103,3 +103,84 @@ body {
 .animate-overlay-in { animation: overlayIn 0.2s ease-out; }
 .animate-skeleton { animation: skeletonPulse 1.5s ease-in-out infinite; }
 .animate-stagger-in { animation: staggerIn 0.35s ease-out forwards; }
+
+@keyframes pulse-glow {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(124, 58, 237, 0); }
+  50% { box-shadow: 0 0 20px 5px rgba(124, 58, 237, 0.3); }
+}
+@keyframes ripple {
+  0% { transform: scale(0); opacity: 1; }
+  100% { transform: scale(4); opacity: 0; }
+}
+@keyframes shimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+@keyframes bounce-in {
+  0% { transform: scale(0.3); opacity: 0; }
+  50% { transform: scale(1.05); }
+  70% { transform: scale(0.9); }
+  100% { transform: scale(1); opacity: 1; }
+}
+@keyframes float {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-5px); }
+}
+@keyframes glow-pulse {
+  0%, 100% { opacity: 0.6; }
+  50% { opacity: 1; }
+}
+
+.animate-pulse-glow { animation: pulse-glow 2s ease-in-out infinite; }
+.animate-ripple { animation: ripple 0.6s ease-out; }
+.animate-shimmer { background: linear-gradient(90deg, transparent, rgba(255,255,255,0.1), transparent); background-size: 200% 100%; animation: shimmer 1.5s infinite; }
+.animate-bounce-in { animation: bounce-in 0.5s ease-out; }
+.animate-float { animation: float 3s ease-in-out infinite; }
+.animate-glow-pulse { animation: glow-pulse 2s ease-in-out infinite; }
+
+.hover-lift { transition: transform 0.3s ease, box-shadow 0.3s ease; }
+.hover-lift:hover { transform: translateY(-4px); box-shadow: 0 10px 30px rgba(124, 58, 237, 0.2); }
+
+.hover-scale { transition: transform 0.2s ease; }
+.hover-scale:hover { transform: scale(1.05); }
+.hover-scale:active { transform: scale(0.98); }
+
+.hover-glow { transition: box-shadow 0.3s ease; }
+.hover-glow:hover { box-shadow: 0 0 20px rgba(124, 58, 237, 0.4); }
+
+.hover-brightness { transition: filter 0.2s ease; }
+.hover-brightness:hover { filter: brightness(1.1); }
+
+.focus-ring { transition: box-shadow 0.2s ease; }
+.focus-ring:focus { box-shadow: 0 0 0 3px rgba(124, 58, 237, 0.4); outline: none; }
+
+.transition-smooth { transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1); }
+
+.btn-press { transition: transform 0.1s ease; }
+.btn-press:active { transform: scale(0.95); }
+
+.card-hover { transition: all 0.3s ease; }
+.card-hover:hover { border-color: rgba(124, 58, 237, 0.3); box-shadow: 0 8px 30px rgba(0, 0, 0, 0.3); }
+
+.input-focus { transition: all 0.2s ease; }
+.input-focus:focus { border-color: rgba(124, 58, 237, 0.5); box-shadow: 0 0 0 3px rgba(124, 58, 237, 0.15); }
+
+.toast-enter { animation: slideIn 0.3s ease-out; }
+.toast-exit { animation: slideOutRight 0.25s ease-in forwards; }
+
+.skeleton-wave { background: linear-gradient(90deg, transparent, rgba(255,255,255,0.08), transparent); background-size: 200% 100%; animation: shimmer 1.5s infinite; }
+
+.loading-dots::after { content: ''; animation: dots 1.5s steps(4, end) infinite; }
+@keyframes dots {
+  0%, 20% { content: '.'; }
+  40% { content: '..'; }
+  60%, 100% { content: '...'; }
+}
+
+/* Mobile: dificulta menu de contexto em imagens; não bloqueia prints do sistema. */
+@media (max-width: 768px) {
+  .novamart-app-root img {
+    -webkit-touch-callout: none;
+    -webkit-user-drag: none;
+  }
+}

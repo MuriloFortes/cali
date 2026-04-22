@@ -11,6 +11,13 @@ function getSetting(key) {
   return row?.value ?? "";
 }
 
+function getShippingFixedBRL() {
+  const raw = getSetting("site_shipping_fixed");
+  const n = parseFloat(String(raw ?? "").replace(",", "."));
+  if (Number.isFinite(n) && n >= 0 && n <= 999999.99) return Math.round(n * 100) / 100;
+  return 15;
+}
+
 router.get("/pix", authenticate, (req, res) => {
   const pixKey = getSetting("pix_key");
   const pixKeyType = getSetting("pix_key_type");
@@ -149,6 +156,7 @@ router.get("/site", authenticate, (req, res) => {
   const btnPrimaryFrom = getSetting("site_btn_primary_from") || "#7c3aed";
   const btnPrimaryTo = getSetting("site_btn_primary_to") || "#6366f1";
   const btnSecondary = getSetting("site_btn_secondary") || "#7c3aed";
+  const shippingFixedBRL = getShippingFixedBRL();
 
   res.json({
     icon,
@@ -167,6 +175,7 @@ router.get("/site", authenticate, (req, res) => {
     btnPrimaryFrom,
     btnPrimaryTo,
     btnSecondary,
+    shippingFixedBRL,
   });
 });
 
@@ -191,6 +200,7 @@ router.get("/site/public", (req, res) => {
   const btnPrimaryFrom = getSetting("site_btn_primary_from") || "#7c3aed";
   const btnPrimaryTo = getSetting("site_btn_primary_to") || "#6366f1";
   const btnSecondary = getSetting("site_btn_secondary") || "#7c3aed";
+  const shippingFixedBRL = getShippingFixedBRL();
 
   res.json({
     icon,
@@ -209,6 +219,7 @@ router.get("/site/public", (req, res) => {
     btnPrimaryFrom,
     btnPrimaryTo,
     btnSecondary,
+    shippingFixedBRL,
   });
 });
 
@@ -261,6 +272,17 @@ router.put("/site", authenticate, requireAdmin, uploadSiteAssets, (req, res) => 
   const nextBtnPrimaryTo = typeof btnPrimaryTo === "string" && /^#([0-9a-fA-F]{3}){1,2}$/.test(btnPrimaryTo.trim()) ? btnPrimaryTo.trim() : null;
   const nextBtnSecondary = typeof btnSecondary === "string" && /^#([0-9a-fA-F]{3}){1,2}$/.test(btnSecondary.trim()) ? btnSecondary.trim() : null;
 
+  const { shippingFixedBRL, shipping_fixed: shippingFixedSnake } = req.body ?? {};
+  const shippingFixedRaw = shippingFixedBRL ?? shippingFixedSnake;
+  let nextShippingFixedStr = null;
+  if (shippingFixedRaw !== undefined && shippingFixedRaw !== null && String(shippingFixedRaw).trim() !== "") {
+    const n = parseFloat(String(shippingFixedRaw).replace(",", "."));
+    if (!Number.isFinite(n) || n < 0 || n > 999999.99) {
+      return res.status(400).json({ error: true, message: "Valor de frete fixo inválido" });
+    }
+    nextShippingFixedStr = String(Math.round(n * 100) / 100);
+  }
+
   const upsert = db.prepare(`
     INSERT INTO store_settings (key, value, updated_at)
     VALUES (?, ?, datetime('now'))
@@ -285,6 +307,7 @@ router.put("/site", authenticate, requireAdmin, uploadSiteAssets, (req, res) => 
     if (nextBtnPrimaryFrom !== null) upsert.run("site_btn_primary_from", nextBtnPrimaryFrom);
     if (nextBtnPrimaryTo !== null) upsert.run("site_btn_primary_to", nextBtnPrimaryTo);
     if (nextBtnSecondary !== null) upsert.run("site_btn_secondary", nextBtnSecondary);
+    if (nextShippingFixedStr !== null) upsert.run("site_shipping_fixed", nextShippingFixedStr);
   })();
 
   res.json({ success: true });

@@ -84,8 +84,15 @@ router.get("/", authenticate, (req, res) => {
   res.status(200).json({ orders });
 });
 
+function getStoreShippingFixed() {
+  const row = db.prepare("SELECT value FROM store_settings WHERE key = ?").get("site_shipping_fixed");
+  const n = parseFloat(String(row?.value ?? "15").replace(",", "."));
+  if (Number.isFinite(n) && n >= 0 && n <= 999999.99) return Math.round(n * 100) / 100;
+  return 15;
+}
+
 router.post("/", authenticate, (req, res) => {
-  const { items, paymentMethod, address, discount, shipping } = req.body ?? {};
+  const { items, paymentMethod, address, couponCode } = req.body ?? {};
   if (!Array.isArray(items) || items.length === 0) {
     return res.status(400).json({ error: true, message: "Itens são obrigatórios" });
   }
@@ -96,8 +103,11 @@ router.post("/", authenticate, (req, res) => {
     return res.status(400).json({ error: true, message: "Endereço é obrigatório" });
   }
   const addressJson = JSON.stringify(address);
-  const discountNum = discount != null ? parseFloat(discount) : 0;
-  const shippingNum = shipping != null ? parseFloat(shipping) : 15;
+  /** Desconto só via cupom validado no servidor (não confiar em `discount` do cliente). */
+  let discountNum = 0;
+  const shippingNum = getStoreShippingFixed();
+  const couponNormalized =
+    couponCode != null && String(couponCode).trim() ? String(couponCode).trim().toUpperCase() : null;
 
   const unavailable = [];
   for (const it of items) {
@@ -125,6 +135,10 @@ router.post("/", authenticate, (req, res) => {
   const insertOrder = db.prepare(`
     INSERT INTO orders (id, user_id, total, discount, shipping, status, payment_method, address_json)
     VALUES (?, ?, ?, ?, ?, 'pending', ?, ?)
+  `);
+  const insertRedemption = db.prepare(`
+    INSERT INTO coupon_redemptions (coupon_id, user_id, order_id)
+    VALUES (?, ?, ?)
   `);
   const insertItem = db.prepare(`
     INSERT INTO order_items (order_id, product_id, product_name, quantity, unit_price)
@@ -154,9 +168,26 @@ router.post("/", authenticate, (req, res) => {
           unitPrice: prod.price,
         });
       }
+      let couponIdForRedeem = null;
+      if (couponNormalized) {
+        const coupon = db
+          .prepare("SELECT * FROM coupons WHERE UPPER(code) = ? AND active = 1")
+          .get(couponNormalized);
+        if (!coupon) throw new Error("Cupom inválido ou inativo");
+        const used = db
+          .prepare("SELECT 1 FROM coupon_redemptions WHERE coupon_id = ? AND user_id = ?")
+          .get(coupon.id, req.user.id);
+        if (used) throw new Error("Este cupom já foi utilizado na sua conta");
+        const pctDiscount = Math.round(total * (coupon.percent / 100) * 100) / 100;
+        discountNum = Math.min(pctDiscount, total);
+        couponIdForRedeem = coupon.id;
+      }
       const finalTotal = total - discountNum + shippingNum;
       // Segundo: inserir o pedido para garantir que order_items (FK) vai existir
       insertOrder.run(orderId, req.user.id, finalTotal, discountNum, shippingNum, paymentMethod, addressJson);
+      if (couponIdForRedeem) {
+        insertRedemption.run(couponIdForRedeem, req.user.id, orderId);
+      }
       // Terceiro: inserir itens e atualizar estoque
       for (const pi of preparedItems) {
         insertItem.run(orderId, pi.productId, pi.productName, pi.quantity, pi.unitPrice);

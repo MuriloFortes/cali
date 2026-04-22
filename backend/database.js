@@ -124,6 +124,34 @@ function runSchema() {
       value      TEXT NOT NULL,
       updated_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
+
+    CREATE TABLE IF NOT EXISTS product_categories (
+      id          TEXT PRIMARY KEY,
+      name        TEXT NOT NULL UNIQUE COLLATE NOCASE,
+      emoji       TEXT NOT NULL DEFAULT '📦',
+      sort_order  INTEGER NOT NULL DEFAULT 0,
+      active      INTEGER NOT NULL DEFAULT 1 CHECK(active IN (0,1)),
+      created_at  TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at  TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
+    CREATE TABLE IF NOT EXISTS coupons (
+      id          TEXT PRIMARY KEY,
+      code        TEXT NOT NULL UNIQUE COLLATE NOCASE,
+      percent     REAL NOT NULL CHECK(percent > 0 AND percent <= 100),
+      active      INTEGER NOT NULL DEFAULT 1 CHECK(active IN (0,1)),
+      created_at  TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at  TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
+    CREATE TABLE IF NOT EXISTS coupon_redemptions (
+      id          INTEGER PRIMARY KEY AUTOINCREMENT,
+      coupon_id   TEXT NOT NULL REFERENCES coupons(id) ON DELETE CASCADE,
+      user_id     TEXT NOT NULL REFERENCES users(id),
+      order_id    TEXT NOT NULL REFERENCES orders(id),
+      created_at  TEXT NOT NULL DEFAULT (datetime('now')),
+      UNIQUE(coupon_id, user_id)
+    );
   `);
 
   // Migrações progressivas para colunas opcionais em users
@@ -134,6 +162,7 @@ function runSchema() {
     "ALTER TABLE users ADD COLUMN save_address INTEGER DEFAULT 1",
     "ALTER TABLE users ADD COLUMN session_token TEXT DEFAULT NULL",
     "ALTER TABLE users ADD COLUMN webauthn_registered INTEGER DEFAULT 0",
+    "ALTER TABLE users ADD COLUMN approved INTEGER NOT NULL DEFAULT 1 CHECK(approved IN (0,1))",
   ];
 
   for (const sql of alterStatements) {
@@ -195,11 +224,14 @@ function runSeed() {
     ["site_btn_primary_from", "#7c3aed"],
     ["site_btn_primary_to", "#6366f1"],
     ["site_btn_secondary", "#7c3aed"],
+    ["site_shipping_fixed", "15"],
   ];
 
   for (const [key, value] of settingsDefaults) {
     insertIgnoreSetting.run(key, value);
   }
+
+  seedProductCategories();
 
   if (count.n > 0) return;
 
@@ -209,8 +241,8 @@ function runSeed() {
   ];
 
   const insUser = db.prepare(`
-    INSERT INTO users (id, name, email, phone, password_hash, role, active)
-    VALUES (?, ?, ?, ?, ?, ?, 1)
+    INSERT INTO users (id, name, email, phone, password_hash, role, active, approved)
+    VALUES (?, ?, ?, ?, ?, ?, 1, 1)
   `);
   for (const u of users) {
     const hash = bcrypt.hashSync(u.password, 10);
@@ -320,11 +352,28 @@ function runSeed() {
     ["site_btn_primary_from", "#7c3aed"],
     ["site_btn_primary_to", "#6366f1"],
     ["site_btn_secondary", "#7c3aed"],
+    ["site_shipping_fixed", "15"],
   ];
   for (const [key, value] of defaults) {
     const c = db.prepare("SELECT COUNT(*) as n FROM store_settings WHERE key = ?").get(key);
     if (c.n === 0) upsertSetting.run(key, value);
   }
+}
+
+function seedProductCategories() {
+  const n = db.prepare("SELECT COUNT(*) as n FROM product_categories").get();
+  if (n.n > 0) return;
+  const ins = db.prepare(`
+    INSERT INTO product_categories (id, name, emoji, sort_order, active)
+    VALUES (?, ?, ?, ?, 1)
+  `);
+  const rows = [
+    ["cat-ele", "Eletrônicos", "🔌", 1],
+    ["cat-roup", "Roupas", "👕", 2],
+    ["cat-casa", "Casa", "🏠", 3],
+    ["cat-esp", "Esportes", "⚽", 4],
+  ];
+  for (const r of rows) ins.run(...r);
 }
 
 export function initDatabase() {
@@ -334,6 +383,8 @@ export function initDatabase() {
 
 export function resetDatabase() {
   db.exec(`
+    DROP TABLE IF EXISTS coupon_redemptions;
+    DROP TABLE IF EXISTS coupons;
     DROP TABLE IF EXISTS webauthn_credentials;
     DROP TABLE IF EXISTS sms_codes;
     DROP TABLE IF EXISTS messages;
@@ -341,6 +392,7 @@ export function resetDatabase() {
     DROP TABLE IF EXISTS order_items;
     DROP TABLE IF EXISTS orders;
     DROP TABLE IF EXISTS products;
+    DROP TABLE IF EXISTS product_categories;
     DROP TABLE IF EXISTS store_settings;
     DROP TABLE IF EXISTS users;
   `);
